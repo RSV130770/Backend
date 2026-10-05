@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Access Denied</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    .card {
+      max-width: 400px;
+      margin: auto;
+      margin-top: 10vh;
+    }
+    .emoji {
+      font-size: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card shadow">
+      <div class="card-body text-center">
+        <div class="emoji mb-3">🚫</div>
+        <h4 class="card-title">Access Denied</h4>
+        <p class="card-text">Invalid password. Please try again.</p>
+        <button class="btn btn-danger btn-block mt-3" onclick="location.href='/auth'">Retry</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

@@ -1,0 +1,44 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DeadEnd</title>
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <script src="/jquery.js"></script>
+</head>
+<body class="bg-light">
+
+<div class="container mt-5">
+  <div class="card shadow-sm">
+    <div class="card-body text-center">
+      <h3 class="card-title text-danger">Your Session Expired</h3>
+      <p class="card-text">
+        Your active session has timed out.  
+        Click <strong>Continue</strong> to rejoin the busy page.
+      </p>
+
+      <!-- Hidden fields injected by server -->
+      <form id="deadendForm">
+        <input type="hidden" id="sessionKey" value="<!-- injected key -->">
+        <input type="hidden" id="encodedPass" value="<!-- injected pass -->">
+
+        <button type="button" class="btn btn-primary btn-lg" onclick="continueToBusy()">
+          Continue
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function continueToBusy() {
+  const key = document.getElementById("sessionKey").value;
+  const pass = document.getElementById("encodedPass").value;
+
+  // Redirect to busy page with query params
+  window.location.href = "/busy?key=" + encodeURIComponent(key) +
+                         "&pass=" + encodeURIComponent(pass);
+}
+
+

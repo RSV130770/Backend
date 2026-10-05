@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Premifarm</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<!-- AP_IP_INJECT --> 
+  <link rel="stylesheet" href="/bootstrap.min.css">
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: sans-serif;
+    }
+    .card {
+      max-width: 420px;
+      margin: auto;
+      margin-top: 12vh;
+      padding: 25px;
+      text-align: center;
+    }
+    .btn-big {
+      padding: 16px;
+      font-size: 1.2rem;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="card shadow">
+      <h3 class="mb-3">Welcome to Premifarm</h3>
+      <p class="text-muted mb-4">
+        Tap the button below to open the full interface in your browser.
+      </p>
+
+      <a id="openBtn" class="btn btn-success btn-big btn-block">
+        Open Full Interface
+      </a>
+<!-- Fallback hint, hidden by default -->
+<div id="hint" style="display:none; margin-top:16px; color:#555; font-size:0.95rem; line-height:1.5;">
+</div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const btn = document.getElementById("openBtn");
+  const hint = document.getElementById("hint");
+  btn.removeAttribute("href");
+
+  function init() {
+    if (typeof AP_IP === "undefined") return setTimeout(init, 10);
+
+    const targetURL = AP_IP + "/auth.html";
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const host = AP_IP.replace("http://", "");
+
+    btn.onclick = function (e) {
+      e.preventDefault();
+
+      if (isAndroid) {
+        // Layer 1: intent:// for older Android / Chrome
+        const intentURL = "intent://" + host + "/auth.html#Intent;scheme=http;package=com.android.chrome;end";
+        window.location.href = intentURL;
+
+        // Layer 2: window.open fallback after short delay
+        // (fires if intent:// didn't navigate away)
+        setTimeout(function () {
+          const w = window.open(targetURL, "_blank");
+          if (!w || w.closed || typeof w.closed === "undefined") {
+            // Layer 3: show manual fallback UI
+            showManualFallback(targetURL);
+          }
+        }, 800);
+
+      } else {
+        // Non-Android: plain navigation works fine
+        window.location.href = targetURL;
+      }
+    };
+
+    // Pre-set href for non-Android (allows normal tap-to-navigate)
+    if (!isAndroid) {
+      btn.href = targetURL;
+      btn.onclick = null;
+    }
+  }
+
+  function showManualFallback(url) {
+    hint.innerHTML =
+      "👆 If nothing opened, copy this address into your browser:<br>" +
+      "<strong style='word-break:break-all;font-size:1rem'>" + url + "</strong>";
+    hint.style.display = "block";
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>

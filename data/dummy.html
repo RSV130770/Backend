@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>Activating…</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+</style>
+</head><body>
+<script>
+(function(){
+  const session = "{{TOKEN}}";
+  const ACT = 'premifarm_activate';
+  const ACK = 'premifarm_activate_ack';
+  const CHANNEL = 'premifarm_channel';
+
+  let ack = false;
+  const payload = { type: ACT, session, ts: Date.now() };
+
+  // BroadcastChannel
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel(CHANNEL);
+    bc.postMessage(payload);
+    bc.onmessage = ev => {
+      const m = ev.data;
+      if (m && m.type === ACK && m.session === session) {
+        ack = true;
+        // Do NOT close window — just show message
+        document.body.innerHTML =
+          "<h2 style='font-family:sans-serif'>Control panel is already open in another tab.<br><br>Please return to that tab.</h2>";
+      }
+    };
+  }
+
+  // localStorage fallback
+  try {
+    localStorage.setItem(ACT, JSON.stringify(payload));
+    setTimeout(() => localStorage.removeItem(ACT), 200);
+
+    window.addEventListener('storage', ev => {
+      if (ev.key === ACK && ev.newValue) {
+        const m = JSON.parse(ev.newValue);
+        if (m.type === ACK && m.session === session) {
+          ack = true;
+          document.body.innerHTML =
+            "<h2 style='font-family:sans-serif'>Control panel is already open in another tab.<br><br>Please return to that tab.</h2>";
+        }
+      }
+    });
+  } catch(e){}
+
+  // postMessage fallback
+  window.addEventListener('message', ev => {
+    if (ev.origin !== location.origin) return;
+    const m = ev.data;
+    if (m && m.type === ACK && m.session === session) {
+      ack = true;
+      document.body.innerHTML =
+        "<h2 style='font-family:sans-serif'>Control panel is already open in another tab.<br><br>Please return to that tab.</h2>";
+    }
+  });
+
+  // Ask opener
+  try {
+    if (window.opener && !window.opener.closed)
+      window.opener.postMessage(payload, location.origin);
+  } catch(e){}
+
+  // If no ACK → become main tab
+setTimeout(() => {
+  if (!ack) {
+    // Reset keyboard context before navigating
+    const dummy = document.createElement('input');
+    dummy.setAttribute('type', 'text');
+    dummy.style.position = 'fixed';
+    dummy.style.opacity = '0';
+    dummy.style.top = '-100px';
+    document.body.appendChild(dummy);
+    dummy.focus();
+    dummy.blur();
+    document.body.removeChild(dummy);
+    window.location.replace('/index.html');
+  }
+}, 150);
+
+})();
+</script>
+</body></html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Premifarm Captive Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      src: url('/Inter-Regular.ttf') format('truetype');
+    }
+    body { background-color: #f8f9fa; }
+    .card { max-width: 400px; margin: auto; margin-top: 10vh; }
+    #status { margin-top: 15px; text-align: center; font-size: 1rem; color: #555; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="card shadow">
+      <div class="card-body" id="authBox">
+
+        <!-- LOGIN FORM -->
+        <h4 class="card-title text-center mb-3">Welcome to Premifarm</h4>
+        <p class="text-center">Scan the code on your minifarm cover and follow the link to access.</p>
+        <form method="POST" action="/login">
+          <div class="form-group">
+            <label for="password">Enter Password:</label>
+            <input type="password" class="form-control" id="password" required placeholder="Password">
+            <input type="hidden" id="validate" name="validate">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block mt-3">Submit</button>
+        </form>
+
+        <div id="status">Not authorized yet...</div>
+
+      </div>
+    </div>
+  </div>
+  <script src="/jquery.js"></script>
+  <script src="/bootstrap.js"></script>
+  <!-- ONE continuous script block starts here -->
+  <script>
+let clue = null;
+
+/* Cross-tab coordination: BroadcastChannel + sessionStorage lock */
+const BC_NAME = 'premifarm_channel';
+const LOCK_KEY = 'premifarm_active_tab';
+const bc = ('BroadcastChannel' in window) ? new BroadcastChannel(BC_NAME) : null;
+
+function setLock(id) {
+  try { sessionStorage.setItem(LOCK_KEY, JSON.stringify({ id, ts: Date.now() })); } catch(e){}
+}
+function getLock() {
+  try { return JSON.parse(sessionStorage.getItem(LOCK_KEY)); } catch(e){ return null; }
+}
+function releaseLock(id) {
+  try {
+    const cur = getLock();
+    if (cur && cur.id === id) sessionStorage.removeItem(LOCK_KEY);
+  } catch(e){}
+}
+
+const myId = Math.random().toString(36).slice(2);
+let amActive = false;
+
+/* Try to become active if no one else holds the lock */
+function tryBecomeActive() {
+  const cur = getLock();
+  if (!cur) {
+    setLock(myId);
+    amActive = true;
+    if (bc) bc.postMessage({ type: 'active', id: myId });
+    console.log('This tab is now active for login');
+    return true;
+  } else {
+    console.log('Active tab exists:', cur);
+    return false;
+  }
+}
+
+/* When a new tab opens, it announces itself; active tab responds */
+if (bc) {
+  bc.onmessage = (ev) => {
+    const msg = ev.data;
+    if (!msg) return;
+    if (msg.type === 'whois') {
+      const cur = getLock();
+      if (cur && cur.id === myId) {
+        // we are active, tell requester to use us
+        bc.postMessage({ type: 'activeHere', id: myId });
+      }
+    } else if (msg.type === 'activeHere') {
+      // another tab says it's active
+      console.log('Another tab is active:', msg.id);
+      if (!amActive) {
+        document.getElementById('status').textContent = "Another login window is active. Please use that window.";
+      }
+    } else if (msg.type === 'focusRequest' && amActive) {
+      // try to focus our window (best-effort)
+      try { window.focus(); } catch(e){}
+      // optionally flash UI
+      document.getElementById('status').textContent = "Please use this window to sign in.";
+    }
+  };
+}
+
+/* On load, try to become active; if not, ask who is active and request focus */
+window.addEventListener('load', () => {
+  const became = tryBecomeActive();
+  if (!became && bc) {
+    // ask who is active
+    bc.postMessage({ type: 'whois', id: myId });
+    // after short delay, ask active tab to focus itself
+    setTimeout(() => {
+      bc.postMessage({ type: 'focusRequest', id: myId });
+      document.getElementById('status').textContent = "Another login window is active. It should come to front.";
+    }, 300);
+  } else if (became) {
+    // proceed with normal initialization
+    loadClue();
+  }
+});
+
+/* Release lock when this tab unloads */
+window.addEventListener('beforeunload', () => {
+  releaseLock(myId);
+  if (bc) bc.close();
+});
+
+
+function initConstants() {
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+  const summ = [];
+  const k = [];
+  const isComposite = {};
+  let primeCounter = 0;
+
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      // Sieve up to candidate² to correctly mark all composites
+      for (let multiple = candidate * candidate; multiple < 96721; multiple += candidate) {
+        isComposite[multiple] = true;
+      }
+      summ[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter]    = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+      primeCounter++;
+    }
+  }
+  return { summ, k };
+}
+
+function rightRotate(value, amount) {
+  return (value >>> amount) | (value << (32 - amount));
+}
+
+function preprocessMessage(ascii) {
+  const asciiBitLength = ascii.length * 8;
+  // zero-initialize words to avoid undefined ORs
+  let words = new Array(Math.ceil((ascii.length + 9) / 4)).fill(0);
+
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+
+  for (let i = 0; i < ascii.length; i++) {
+    const j = ascii.charCodeAt(i);
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+
+  words.push((asciiBitLength / Math.pow(2, 32)) | 0);
+  words.push(asciiBitLength);
+
+  return words;
+}
+
+
+
+function processChunk(words, summ, k) {
+  for (let j = 0; j < words.length;) {
+    const w = words.slice(j, j += 16);
+    const oldsumm = summ.slice(0);
+
+    for (let i = 0; i < 64; i++) {
+      const w15 = w[i - 15];
+      const w2 = w[i - 2];
+
+      const a = summ[0];
+      const e = summ[4];
+
+      const temp1 =
+        summ[7] +
+        (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) +
+        ((e & summ[5]) ^ (~e & summ[6])) +
+        k[i] +
+        (w[i] =
+          i < 16
+            ? w[i]
+            : (w[i - 16] +
+               (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) +
+               w[i - 7] +
+               (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+
+      const temp2 =
+        (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) +
+        ((a & summ[1]) ^ (a & summ[2]) ^ (summ[1] & summ[2]));
+
+      summ = [(temp1 + temp2) | 0].concat(summ);
+      summ[4] = (summ[4] + temp1) | 0;
+    }
+
+    for (let i = 0; i < 8; i++) {
+      summ[i] = (summ[i] + oldsumm[i]) | 0;
+    }
+  }
+
+  return summ;
+}
+
+
+function summToHex(summ) {
+  let result = '';
+
+  for (let i = 0; i < 8; i++) {
+    for (let j = 3; j + 1; j--) {
+      const b = (summ[i] >> (j * 8)) & 255;
+      result += (b < 16 ? '0' : '') + b.toString(16);
+    }
+  }
+
+  return result;
+}
+
+
+function main(ascii) {
+  const { summ: initialsumm, k } = initConstants();
+  const words = preprocessMessage(ascii);
+  const finalsumm = processChunk(words, initialsumm, k);
+  return summToHex(finalsumm);
+}
+
+
+async function loadClue() {
+  const statusEl = document.getElementById("status");
+
+  try {
+    const response = await fetch("/clue");
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.text();
+    clue = data.trim();
+
+    console.log("Clue loaded:", clue);
+    statusEl.textContent = "Ready. You can enter your password.";
+  } catch (err) {
+    console.error("Failed to load clue:", err);
+    statusEl.textContent = "Unable to load authentication key. Check connection and retry.";
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.querySelector('form');
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const statusEl = document.getElementById('status');
+    const pass = document.getElementById('password').value.trim();
+
+    if (!pass) {
+      statusEl.textContent = "Please enter a password.";
+      return;
+    }
+
+    if (clue === null) {
+      statusEl.textContent = "Still initializing…";
+      return;
+    }
+
+    try {
+      const summed = main(pass + clue);
+      console.log("Computed hash (programmatic):", summed);
+      if (!summed) {
+        statusEl.textContent = "Hashing failed.";
+        return;
+      }
+      document.getElementById('validate').value = summed;
+      // final sanity check
+      if (!document.getElementById('validate').value) {
+        statusEl.textContent = "Failed to set validate field.";
+        return;
+      }
+      // submit once the hidden field is set
+      form.submit();
+    } catch (err) {
+      console.error("Hash error:", err);
+      statusEl.textContent = "Hashing error. Check console.";
+    }
+  });
+});
+  </script>
+</body>
+</html>
+

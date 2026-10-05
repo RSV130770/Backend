@@ -1,0 +1,417 @@
+﻿
+/*system*/
+.card .card {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+#card-body
+{
+padding-left:10px;
+}
+/* buttons group*/
+/* 1. Left-align the button column (override Bootstrap text-right) */
+.row.mb-3.align-items-end .col-6.text-right.p-0 {
+  text-align: left !important;
+  padding-left: 0 !important;
+}
+
+/* stronger visible raised shadow for unpressed buttons */
+.btn-small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  border-radius: 0.35rem;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.18),
+    0 2px 4px rgba(0, 0, 0, 0.10);
+  transition: box-shadow 140ms ease, transform 120ms ease;
+  transform: translateZ(0);
+}
+
+/* hover: slightly stronger outer shadow */
+.btn-small:hover:not(:disabled) {
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.20),
+    0 3px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* pressed / active: inset shadow to look pressed */
+.btn-small:active,
+.btn-small.active,
+.btn-small:focus:not(:disabled) {
+  box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.22);
+  transform: translateY(1px);
+  outline: none;
+}
+
+/* disabled: remove shadow and mute */
+.btn-small:disabled,
+.btn-small[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+
+
+/* 8. Small spacing between buttons */
+#taskStart, #taskPause, #taskStop {
+  margin-right: 0.5rem;
+}
+
+/* 9. keep the button group visually grouped on very small screens */
+@media (max-width: 575.98px) {
+  .row.mb-3.align-items-end .col-6.text-right.p-0 {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+}
+/* end of buttons group*/
+
+
+
+.navbar { flex-wrap: nowrap; }
+#mainNav { flex: 1 1 auto; }
+#mainNavList { display: flex; justify-content: center; width: 100%; }
+#datetime { margin-left: 1rem; }
+
+.nav-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  height: 20px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  background: #ccc;
+  border-radius: 50%;
+}
+
+.dot.active {
+  background: #007bff;
+}
+
+.channel-row {
+  flex-wrap: wrap;
+}
+
+.value-big, .countdown {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.d-flex > * {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.page .row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.page .col-6 {
+  padding-left: 0;
+  padding-right: 0;
+  min-width: 0;
+}
+
+#container {
+  display: flex;
+  flex-direction: row;
+  width: 300vw;      /* ✅ 3 pages × 100vw */
+  transition: transform 0.3s ease;
+  margin: 0;
+  padding: 0;
+  padding-top: 70px;
+}
+
+.page {
+  width: 100vw;      /* ✅ each page = viewport width */
+  flex-shrink: 0;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+.container-fluid {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+html, body {
+  overflow-x: hidden !important;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  flex-wrap: wrap;
+}
+
+table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.modal {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.modal-backdrop {
+  z-index: 2950 !important;
+}
+
+#editModal,
+#saveAsModal,
+#batchModal {
+  z-index: 3000 !important;
+}
+
+
+/* end system*/
+
+/*--------------Pic to CSS part------------------*/
+ 
+
+  .pic {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center; /* centers horizontally */
+}
+
+.pic img {
+  display: block;          /* removes inline spacing */
+  margin: 0;               /* no extra left margin */
+  max-width: 70%;          /* scales inside the box */
+  max-height: 70%;
+}
+
+.btn svg {
+  vertical-align: middle;
+}
+
+/*---------------------- channel row---------------------------*/
+    .channel-row { border-bottom: 1px solid #eee; padding: 0.75rem 0; }
+    .svg-icon { 
+      width: 40px;
+      height: 40px;
+      margin-right: 10px; 
+    }
+    .value-big { font-size: 1.2rem; font-weight: 600; }
+    .countdown { font-variant-numeric: tabular-nums; font-size: 0.9rem; color: #666; }
+    .btn-small {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+/* -------------------------scedule CSS-------------------------*/
+
+/* Batch modal channel rows */
+.batch-channel-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.batch-channel-row:last-child {
+  border-bottom: none;
+}
+
+.batch-channel-label {
+  flex: 1;
+  font-weight: 500;
+}
+
+.batch-channel-duty {
+  width: 80px;
+  text-align: right;
+}
+
+  /* Time column */
+  #schedule-list td.time,
+  #schedule-list th.time {
+    width: 15%;
+    text-align: left;
+    font-family: monospace;
+  }
+  
+  /* Channel column */
+  #schedule-list td.channel,
+  #schedule-list th.channel {
+    width: 25%;
+  }
+  
+  /* Repeat column */
+  #schedule-list td.repeat,
+  #schedule-list th.repeat {
+    width: 25%;
+  }
+  
+  /* Duty column */
+  #schedule-list td.duty,
+  #schedule-list th.duty {
+    width: 15%;
+    text-align: left;
+  }
+  
+  /* Action column (remove button) */
+  #schedule-list td.actions,
+  #schedule-list th.actions {
+    width: 20%;
+    text-align: left;
+  }
+  
+#edit-rise, 
+#edit-fall,
+#edit-frequency-value 
+{
+  flex: 1 1 auto;
+  min-width: 70px;
+  max-width: 150px;
+}
+
+#edit-rise-unit, 
+#edit-fall-unit, 
+#edit-frequency-unit 
+{
+  flex: 0 0 auto;
+  min-width: 70px;
+  max-width: 70px;
+}
+
+.s-t-time
+{
+  width:20%;
+}
+
+.s-t-cnl
+{
+  width:30%;
+}
+.s-t-how
+{
+  width:30%;
+}
+
+.s-t-val
+{
+  width:15%;
+}
+.s-t-cancel
+{
+  width:5%;
+}
+
+.schedule-remove {
+  text-align: right;        /* or left/center */
+  padding: 0 !important;    /* remove Bootstrap padding */
+  width: 20px;              /* fixed width for consistency */
+}
+
+.schedule-remove .remove-btn {
+  background: none;
+  border: none;
+  color: #d9534f;           /* Bootstrap danger color */
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  vertical-align:middle;
+  cursor: pointer;
+}
+
+.schedule-remove .remove-btn:hover {
+  color: #b52b27;
+}
+
+.table.tight-table td,
+.table.tight-table th {
+  padding: 2px 5px !important;  /* vertical 2px, horizontal 5px */
+}
+
+
+.play-card .card-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.play-card .play-label img {
+  transition: transform 0.2s ease;
+}
+
+.play-card .play-label:hover img {
+  transform: scale(1.1);
+}
+
+.play-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: #444;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: 0.15s ease;
+  margin-left: 6px;
+}
+
+.play-btn:hover {
+  filter: brightness(1.2);
+}
+
+.play-btn.play-on {
+  background: #2e7d32; /* green */
+}
+
+.play-btn.play-off {
+  background: #b71c1c; /* red */
+}
+
+.play-btn.play-active {
+  box-shadow: 0 0 10px rgba(255,255,255,0.7);
+  filter: brightness(1.35);
+}
+
+
+
+
+/* Fixed footer */
+.footer-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;              /* adjust if needed */
+  background: #fff;
+  border-top: 1px solid #ccc;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Prevent content from hiding behind footer */
+.page {
+  padding-bottom: 80px;       /* must be > footer height */
+}
+
