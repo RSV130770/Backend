@@ -839,16 +839,24 @@ function renderSchedule(list) {
   });
 }
 
-function createTreeNode(events) {
-  if (!events || events.length === 0) return;
+// Collect current events of a node from its leaves (leaves are the single source of truth)
+function getNodeEvents($node) {
+  const events = [];
+  $node.find('.tree-leaf').each(function () {
+    events.push($(this).data('event'));
+  });
+  return events;
+}
+
+// Build a tree node (batch) with its leaves; returns the jQuery element, does not insert it
+function buildTreeNode(events) {
+  if (!events || events.length === 0) return null;
 
   const groupId = events[0].groupId;
   const repeat = events[0].repeat;
   const collapseId = `tree-leaves-${groupId}`;
 
-  // Build node header summary
-  const { nodeLabel, nodeTime, nodeDuty } = buildNodeSummary(events);
-
+  const { nodeLabel, nodeTime } = buildNodeSummary(events);
   const allEnabled = events.every(ev => ev.enabled !== false);
 
   const $node = $(`
@@ -872,8 +880,6 @@ function createTreeNode(events) {
   </div>
 `);
 
-  // Store events data
-  $node.data('events', JSON.parse(JSON.stringify(events)));
   $node.data('groupId', groupId);
 
   // Populate leaves
@@ -886,12 +892,11 @@ function createTreeNode(events) {
   $node.find('.tree-node-header').on('click', function (e) {
     if ($(e.target).closest('.tree-edit-btn, .node-check').length) return;
     const $toggle = $node.find('.tree-toggle');
-    const $leaves = $(`#${collapseId}`);
     if ($leaves.hasClass('show')) {
-      $leaves.collapse('hide');
+      ensureCollapseHidden($leaves);
       $toggle.text('▶');
     } else {
-      $leaves.collapse('show');
+      ensureCollapseShown($leaves);
       $toggle.text('▼');
     }
   });
@@ -899,47 +904,51 @@ function createTreeNode(events) {
   // Node checkbox — toggle all leaves
   $node.find('.node-check').on('change', function () {
     const checked = this.checked;
-    $node.find('.leaf-check').prop('checked', checked);
-    // Update stored events
-    const evs = $node.data('events');
-    evs.forEach(ev => ev.enabled = checked);
-    $node.data('events', evs);
+    $node.find('.tree-leaf').each(function () {
+      const $leaf = $(this);
+      $leaf.find('.leaf-check').prop('checked', checked);
+      const ev = $leaf.data('event');
+      ev.enabled = checked;
+      $leaf.data('event', ev);
+    });
   });
 
   // Edit node → batch modal
-  $node.find('.tree-edit-btn').on('click', e => {
+  $node.find('.tree-edit-btn').first().on('click', e => {
     e.stopPropagation();
     openBatchModal($node);
   });
 
-  $('#schedule-tree').append($node);
+  updateNodeCheckboxFor($node);
+  return $node;
+}
+
+function createTreeNode(events) {
+  const $node = buildTreeNode(events);
+  if ($node) $('#schedule-tree').append($node);
+  return $node;
+}
+
+function leafDutyText(ev) {
+  const duty = parseInt(ev.duty) || 0;
+  return duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
 }
 
 function createLeaf(ev, groupId) {
   const cfg = outputsConfig.find(c => c.id == ev.channelId);
   const label = cfg ? cfg.label : `Ch${ev.channelId}`;
-  const duty = parseInt(ev.duty) || 0;
-  const dutyText = duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
   const enabled = ev.enabled !== false;
 
-  const $node = $(`
-  <div class="tree-node" data-group-id="${groupId}">
-    <div class="tree-node-header">
-      <span class="tree-toggle">▶</span>
-      <input type="checkbox" class="tree-check node-check"
-             ${allEnabled ? 'checked' : ''}>
-      <div class="tree-node-label">
-        <span class="tree-node-time">${nodeTime}</span>
-        <span class="text-muted mx-1">·</span>
-        <span class="tree-node-channels">${nodeLabel}</span>
-        <span class="text-muted mx-1">·</span>
-        <span class="tree-node-repeat">${formatRepeat(repeat)}</span>
-      </div>
-      <div class="tree-actions">
-        <button class="tree-edit-btn" title="Edit">✏</button>
-      </div>
+  const $leaf = $(`
+  <div class="tree-leaf">
+    <input type="checkbox" class="tree-check leaf-check" ${enabled ? 'checked' : ''}>
+    <span class="tree-leaf-time">${ev.time || '--:--'}</span>
+    <span class="tree-leaf-label">${label}</span>
+    <span class="tree-leaf-duty">${leafDutyText(ev)}</span>
+    <div class="tree-actions">
+      <button class="tree-edit-btn" title="Edit">✏</button>
+      <button class="tree-remove-btn" title="Remove">×</button>
     </div>
-    <div class="tree-leaves collapse" id="${collapseId}"></div>
   </div>
 `);
 
@@ -970,14 +979,17 @@ function createLeaf(ev, groupId) {
   return $leaf;
 }
 
-function updateNodeCheckbox(groupId) {
-  const $node = $(`.tree-node[data-group-id="${groupId}"]`);
+function updateNodeCheckboxFor($node) {
   const total = $node.find('.leaf-check').length;
   const checked = $node.find('.leaf-check:checked').length;
   $node.find('.node-check').prop({
-    checked: checked === total,
+    checked: total > 0 && checked === total,
     indeterminate: checked > 0 && checked < total
   });
+}
+
+function updateNodeCheckbox(groupId) {
+  updateNodeCheckboxFor($(`.tree-node[data-group-id="${groupId}"]`));
 }
 
 function removeLeaf($leaf, groupId) {
@@ -988,6 +1000,7 @@ function removeLeaf($leaf, groupId) {
     $node.remove();  // last leaf → remove whole node
   } else {
     refreshNodeSummary($node);
+    updateNodeCheckboxFor($node);
   }
 }
 
@@ -1011,9 +1024,9 @@ function buildNodeSummary(events) {
 
   let nodeTime = events[0].time || '--:--';
   if (repeat === 'daily') {
-    const offEv = events.find(ev =>
-      ev.channelId == events[0].channelId && ev.time !== nodeTime
-    );
+    const offEv =
+      events.find(ev => ev.channelId == events[0].channelId && ev.time !== nodeTime) ||
+      events.find(ev => ev.time !== nodeTime);
     if (offEv) nodeTime = `${nodeTime}→${offEv.time}`;
   }
   if (afterDays > 0) nodeTime += ` +${afterDays}d`;
@@ -1294,88 +1307,21 @@ function addNewScheduleItem() {
 }
 
 
-function createScheduleRow(data, openModal = false, groupId = 0) {
-
-  const channel = Array.isArray(outputsConfig) ? outputsConfig.find(c => c.id == data.channelId) : null;
-  const channelLabel = channel ? `${channel.id}: ${channel.label}` : `${data.channelId}: Output`;
-  const effectiveGroupId = data.groupId || groupId || 0;
-  const duty = parseInt(data.duty) || 0;
-  const dutyText = duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
-  const collapseBtn = effectiveGroupId > 0
-    ? `<button class="batch-collapse-btn mr-1" title="Collapse">⊟</button>`
-    : '';
-
-  const $row = $(`
-    <tr>
-      <td class="align-middle time s-t-time" data-time="${data.time}" data-after-days="${data.afterDays}">
-        ${data.time}${data.afterDays > 0 ? ` (+${data.afterDays}d)` : ''}
-      </td>
-      <td class="align-middle channel s-t-cnl" data-id="${data.channelId}">
-        ${channelLabel}
-      </td>
-      <td class="align-middle repeat s-t-how" data-repeat="${data.repeat}">
-        ${formatRepeat(data.repeat)}
-      </td>
-      <td class="align-middle duty s-t-val"
-          data-duty="${duty}"
-          data-rise="${data.rise || 0}"
-          data-fall="${data.fall || 0}"
-          data-on="${data.on || 0}"
-          data-off="${data.off || 0}"
-          data-enabled="${data.enabled}">
-        ${dutyText}
-      </td>
-      <td class="schedule-remove d-flex">
-        <button class="row-edit-btn mr-1">✏</button>
-        ${collapseBtn}
-        <button class="remove-btn">×</button>
-      </td>
-    </tr>
-  `);
-  $row.data('groupId', effectiveGroupId);
-
-  // Collapse button handler
-  if (effectiveGroupId > 0) {
-    $row.find('.batch-collapse-btn').on('click', e => {
-      e.stopPropagation();
-      collapseBatch(effectiveGroupId);
-    });
-  }
-
-  // Edit button — existing modal
-  $row.find('.row-edit-btn').on('click', e => {
-    e.stopPropagation();
-    openScheduleModal($row);
-  });
-
-  $row.find('.remove-btn').on('click', e => {
-    e.stopPropagation();
-    $row.remove();
-  });
-
-  $row.on('click', e => {
-    if ($(e.target).closest('.remove-btn, .row-edit-btn, .batch-collapse-btn').length) return;
-    openScheduleModal($row);
-  });
-
-  $('#schedule-list').append($row);
-
-  if (openModal) $row.click();
-}
-
 // ---------------------------------------------------------
 // OPEN MODAL
 // ---------------------------------------------------------
 
 let currentBatchRow = null;
 let currentBatchGroupId = 0;
+let currentLeafGroupId = 0;
+let editModalMode = null;
 
 function openBatchModal($row, newGroupId) {
   currentBatchRow = $row || null;
   currentBatchGroupId = newGroupId || ($row ? $row.data('groupId') : generateGroupId());
 
   const isNew = !$row;
-  const existingEvents = isNew ? [] : $row.data('events');
+  const existingEvents = isNew ? [] : getNodeEvents($row);
   const afterDays = existingEvents.length > 0 ? (existingEvents[0].afterDays || 0) : 0;
   const expireAfterDays = existingEvents.length > 0 ? (existingEvents[0].expireAfterDays || 0) : 0;
   $('#batch-after-days').val(afterDays);
@@ -1384,9 +1330,11 @@ function openBatchModal($row, newGroupId) {
   const repeat = existingEvents.length > 0 ? existingEvents[0].repeat : 'daily';
   const firstEvent = existingEvents[0];
   const timeOn = firstEvent ? firstEvent.time : '';
-  const offEvent = existingEvents.find(ev =>
-    ev.channelId == (firstEvent && firstEvent.channelId) && ev.time !== timeOn
-  );
+  // Prefer the same channel's second event; fall back to any event with another time
+  const offEvent =
+    existingEvents.find(ev =>
+      ev.channelId == (firstEvent && firstEvent.channelId) && ev.time !== timeOn) ||
+    existingEvents.find(ev => ev.time !== timeOn);
   const timeOff = offEvent ? offEvent.time : '';
 
   const onSec = existingEvents.length > 0 ? (existingEvents[0].on || 0) : 0;
@@ -1407,6 +1355,7 @@ function openBatchModal($row, newGroupId) {
     $('#batch-time-off').val('');
   }
 
+  $('#batch-time-on, #batch-time-off').removeClass('is-invalid');
   updateBatchTimeFields(repeat);
 
   // Build channel list
@@ -1501,16 +1450,25 @@ function saveBatchItem() {
   const isDaily = repeat === 'daily';
   const isCustom = repeat === 'custom';
 
+  // Required time fields: both for daily/custom, only the first for once
+  const $on = $('#batch-time-on');
+  const $off = $('#batch-time-off');
+  const onMissing = !$on.val();
+  const offMissing = (isDaily || isCustom) && !$off.val();
+  $on.toggleClass('is-invalid', onMissing);
+  $off.toggleClass('is-invalid', offMissing);
+  if (onMissing || offMissing) return;
+
   // Time fields — meaning depends on repeat type
-  const timeOn = $('#batch-time-on').val() || '--:--';
-  const timeOff = $('#batch-time-off').val() || '--:--';
+  const timeOn = $on.val();
+  const timeOff = $off.val() || '--:--';
 
   // Custom: derive on/off seconds from HH:MM duration inputs
   const onTotal = isCustom ? timeToSeconds(timeOn) : 0;
   const offTotal = isCustom ? timeToSeconds(timeOff) : 0;
 
   // Preserve original event times for custom/once (time is not edited in batch)
-  const existingEvents = currentBatchRow ? currentBatchRow.data('events') : [];
+  const existingEvents = currentBatchRow ? getNodeEvents(currentBatchRow) : [];
 
   // Build events array
   const events = [];
@@ -1552,24 +1510,19 @@ function saveBatchItem() {
 
   $('#batchModal').modal('hide');
 
-  // Update or insert batch row at correct position
-  const $list = $('#schedule-list');
-  const $anchor = currentBatchRow ? currentBatchRow.prev() : null;
-
-  if (currentBatchRow) currentBatchRow.remove();
-
-  createBatchRow(events);
-
-  // If editing existing — move new row to original position
-  if ($anchor !== null) {
-    const $built = $list.children('tr[data-type="batch"]').last().detach();
-    if ($anchor.length) {
-      $built.insertAfter($anchor);
-    } else {
-      $list.prepend($built);
+  // Replace the edited node in place, or append a new one
+  const $newNode = buildTreeNode(events);
+  if (currentBatchRow) {
+    const wasOpen = currentBatchRow.find('.tree-leaves').hasClass('show');
+    currentBatchRow.replaceWith($newNode);
+    if (wasOpen) {
+      ensureCollapseShown($newNode.find('.tree-leaves'));
+      $newNode.find('.tree-toggle').text('▼');
     }
+  } else {
+    $('#schedule-tree').append($newNode);
   }
-  // If new batch — createBatchRow already appended to end, nothing to move
+  currentBatchRow = null;
 }
 
 function openLeafModal($leaf, groupId) {
@@ -1626,169 +1579,37 @@ function openLeafModal($leaf, groupId) {
   $('#editModal').modal('show');
 }
 
-function openScheduleModal($row) {
-  currentItem = $row;
-
-  // Extract values from row
-  const channelId = $row.find('.channel').data('id');
-  const time = $row.find('.time').data('time');
-  const afterDays = $row.find('.time').data('after-days');
-  const repeatVal = String($row.find('.repeat').data('repeat') || "").toLowerCase();
-  const duty = parseInt($row.find('.duty').data('duty')) || 0;
-  const rise = parseInt($row.find('.duty').data('rise')) || 0;
-  const fall = parseInt($row.find('.duty').data('fall')) || 0;
-  const enabled = $row.find('.duty').data('enabled');
-  const onTotal = parseInt($row.find('.duty').data('on')) || 0;
-  const offTotal = parseInt($row.find('.duty').data('off')) || 0;
-
-  // Populate fields BEFORE showing modal (safe — no collapse involved)
-
-  // Channel — suppress change handler during programmatic set
-  suppressChannelChange = true;
-  $('#edit-channel').val(channelId);
-  suppressChannelChange = false;
-
-  // Duty
-  $('#edit-duty').val(duty);
-  if ($('#edit-duty-toggle').length) {
-    $('#edit-duty-toggle').prop('checked', duty >= 50);
-    $('#edit-duty-toggle-label').text(duty >= 50 ? 'On' : 'Off');
-  }
-
-  // Rise / Fall
-  const r = convertFromMs(rise);
-  $('#edit-rise').val(r.value);
-  //  $('#edit-rise-unit').val(r.unit);
-
-  const f = convertFromMs(fall);
-  $('#edit-fall').val(f.value);
-  //  $('#edit-fall-unit').val(f.unit);
-
-  // Common fields
-  $('#edit-time').val(time);
-  $('#edit-after-days').val(afterDays);
-  $('#edit-enabled').prop('checked', !!enabled);
-
-  // Repeat + custom group
-  parseRepeatFields(repeatVal);
-
-  // Custom repeat fields
-  $('#edit-on-min').val(Math.floor(onTotal / 60));
-  $('#edit-on-sec').val(onTotal % 60);
-  $('#edit-off-min').val(Math.floor(offTotal / 60));
-  $('#edit-off-sec').val(offTotal % 60);
-
-  // Defer ALL collapse calls until modal is fully visible and has real dimensions
-  $('#editModal')
-    .off('shown.bs.modal.scheduleInit')
-    .one('shown.bs.modal.scheduleInit', function () {
-      const cfg = Array.isArray(outputsConfig)
-        ? outputsConfig.find(c => c.id == channelId)
-        : null;
-      const mode = cfg && cfg.mode;
-      if (mode && mode !== lastMode) {
-        updateFieldsForOutputMode(mode);
-        lastMode = mode;
-      }
-
-      // Set unit selectors AFTER collapse is visible — prevents browser reset
-      $('#edit-rise-unit').val(r.unit);
-      $('#edit-fall-unit').val(f.unit);
-    })
-
-  $('#editModal').modal('show');
-}
-
 // ---------------------------------------------------------
 // SAVE MODAL CHANGES
 // ---------------------------------------------------------
 function saveScheduleItem() {
   if (!currentItem) return;
 
-  // COMMON fields
-  const timeVal = $('#edit-time').val() || '--:--';
-  const afterDays = parseInt($('#edit-after-days').val()) || 0;
-  const enabled = $('#edit-enabled').is(':checked');
-
-  // CHANNEL + MODE
-  const channelId = parseInt($('#edit-channel').val());
-  const cfg = Array.isArray(outputsConfig) ? outputsConfig.find(c => c.id == channelId) : null;
+  const ev = currentItem.data('event');
+  const cfg = Array.isArray(outputsConfig) ? outputsConfig.find(c => c.id == ev.channelId) : null;
   const mode = cfg && cfg.mode;
-  const oldTime = currentItem.find('.time').data('time');
-  const oldRepeat = currentItem.find('.repeat').data('repeat');
-  // OUTPUT-SPECIFIC
+
+  // Duty
   let duty = parseInt($('#edit-duty').val()) || 0;
-  if (mode === "no_ramp" && $('#edit-duty-toggle').length) {
+  if (mode === "no_ramp") {
     duty = $('#edit-duty-toggle').is(':checked') ? 100 : 0;
-  } else if (mode === "no_ramp") {
-    // fallback: interpret numeric as on/off
-    duty = duty >= 50 ? 100 : 0;
   }
+  duty = Math.max(0, Math.min(100, duty));
 
-  const rise = $('#collapse-rise').hasClass('show')
-    ? convertToMs($('#edit-rise').val(), $('#edit-rise-unit').val())
-    : (parseInt(currentItem.find('.duty').data('rise')) || 0);
-
-  const fall = $('#collapse-fall').hasClass('show')
-    ? convertToMs($('#edit-fall').val(), $('#edit-fall-unit').val())
-    : (parseInt(currentItem.find('.duty').data('fall')) || 0);
-
-
-  // REPEAT
-  const repeatVal = $('#edit-repeat').val();
-
-  // EVENT-SPECIFIC (custom)
-  let onTotal = 0;
-  let offTotal = 0;
-  if (repeatVal === "custom") {
-    const onMin = parseInt($('#edit-on-min').val()) || 0;
-    const onSec = parseInt($('#edit-on-sec').val()) || 0;
-    const offMin = parseInt($('#edit-off-min').val()) || 0;
-    const offSec = parseInt($('#edit-off-sec').val()) || 0;
-    onTotal = onMin * 60 + onSec;
-    offTotal = offMin * 60 + offSec;
+  // Rise / fall — only when the field is shown for this output mode
+  if ($('#collapse-rise').hasClass('show')) {
+    ev.rise = convertToMs($('#edit-rise').val(), $('#edit-rise-unit').val());
   }
-
-  // Update row DOM
-  currentItem.find('.time')
-    .data('time', timeVal)
-    .data('after-days', afterDays)
-    .text(timeVal + (afterDays > 0 ? ` (+${afterDays}d)` : ''));
-
-  currentItem.find('.channel')
-    .data('id', channelId)
-    .text(`${channelId}: ${cfg ? cfg.label : 'Output'}`);
-
-  currentItem.find('.repeat')
-    .data('repeat', repeatVal)
-    .text(formatRepeat(repeatVal));
-
-  currentItem.find('.duty')
-    .data('duty', duty)
-    .data('rise', rise)
-    .data('fall', fall)
-    .data('on', onTotal)
-    .data('off', offTotal)
-    .data('enabled', enabled);
-
-  const dutyText = duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
-  currentItem.find('.duty').text(dutyText);
-
-  // If time changed and row is part of a group → remove from group
-  if (timeVal !== oldTime && currentItem.data('groupId') > 0) {
-    currentItem.data('groupId', 0);
-    currentItem.attr('data-group-id', 0);
-    // Hide collapse button
-    currentItem.find('.batch-collapse-btn').hide();
+  if ($('#collapse-fall').hasClass('show')) {
+    ev.fall = convertToMs($('#edit-fall').val(), $('#edit-fall-unit').val());
   }
-  // if event type changed
+  ev.duty = duty;
 
-  if (repeatVal !== oldRepeat && currentItem.data('groupId') > 0) {
-    currentItem.data('groupId', 0);
-    currentItem.attr('data-group-id', 0);
-    currentItem.find('.batch-collapse-btn').hide();
-  }
-  // Close modal
+  currentItem.data('event', ev);
+  currentItem.find('.tree-leaf-duty').text(leafDutyText(ev));
+  refreshNodeSummary(currentItem.closest('.tree-node'));
+
+  currentItem = null;
   $('#editModal').modal('hide');
 }
 
@@ -1798,31 +1619,8 @@ function saveScheduleItem() {
 function applyScheduleToServer() {
   taskContent = [];
 
-  $('#schedule-list tr').each(function () {
-    const $item = $(this);
-    const type = $item.data('type');
-
-    if (type === 'batch') {
-      // Expand batch into individual events
-      const events = $item.data('events');
-      events.forEach(ev => taskContent.push(ev));
-    } else {
-      // Individual event — existing logic
-      const groupId = parseInt($item.data('groupId')) || 0;
-      taskContent.push({
-        time: $item.find('.time').data('time'),
-        afterDays: $item.find('.time').data('after-days'),
-        channelId: $item.find('.channel').data('id'),
-        repeat: $item.find('.repeat').data('repeat'),
-        duty: parseInt($item.find('.duty').data('duty')) || 0,
-        rise: parseInt($item.find('.duty').data('rise')) || 0,
-        fall: parseInt($item.find('.duty').data('fall')) || 0,
-        on: $item.find('.duty').data('on') || 0,
-        off: $item.find('.duty').data('off') || 0,
-        enabled: $item.find('.duty').data('enabled'),
-        groupId: groupId
-      });
-    }
+  $('#schedule-tree .tree-node').each(function () {
+    getNodeEvents($(this)).forEach(ev => taskContent.push(ev));
   });
 
   showSaveAsDialog();
@@ -1944,6 +1742,7 @@ function buildRepeatString() {
   if (val === 'custom') return 'custom';
   return val || 'daily';
 }
+
   function initPlayground() {
   console.log("Playground init");
   buildPlayground();
