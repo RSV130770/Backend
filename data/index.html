@@ -27,6 +27,9 @@
       <li class="nav-item">
         <a class="nav-link nav-page-link" href="#" data-page="playground">Playground</a>
       </li>
+      <li class="nav-item">
+        <a class="nav-link nav-page-link" href="#" data-page="settings">Settings</a>
+      </li>
     </ul>
   </div>
 
@@ -169,6 +172,7 @@
     </div>
 
     <div class="card-footer d-flex justify-content-end">
+      <button class="btn btn-outline-danger mr-auto" id="delete-btn" disabled>Delete</button>
       <button class="btn btn-success" id="add-btn">Add</button>
       <button class="btn btn-primary" id="apply-btn">Apply</button>
       <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
@@ -221,6 +225,7 @@
             <label for="ap-pass">Password (WPA2)</label>
             <div class="input-group">
               <input type="password" class="form-control" id="ap-pass"
+                     autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                      maxlength="64" placeholder="Leave blank to keep current">
               <div class="input-group-append">
                 <button class="btn btn-outline-secondary" type="button"
@@ -264,6 +269,7 @@
             <label for="sta-pass">Password</label>
             <div class="input-group">
               <input type="password" class="form-control" id="sta-pass"
+                     autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
                      maxlength="64" placeholder="Leave blank to keep current">
               <div class="input-group-append">
                 <button class="btn btn-outline-secondary" type="button"
@@ -363,7 +369,7 @@
         </div>
 
         <div class="form-group" id="batch-time-off-group" style="display:none;">
-          <label for="batch-time-off">Time Off</label>
+          <label for="batch-time-off" id="batch-time-off-label">Time Off</label>
           <input type="time" class="form-control" id="batch-time-off" style="max-width:140px;">
         </div>
 
@@ -585,6 +591,43 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
         <button class="btn btn-primary" id="save-as-confirm">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete preset confirmation -->
+<div id="deleteModal" class="modal fade" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Delete schedule?</h5>
+      </div>
+      <div class="modal-body">
+        <p>"<span id="delete-task-name"></span>" will be deleted.</p>
+        <p id="delete-running-hint" class="text-danger">It is running now and will be stopped.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger" id="delete-confirm">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Exit confirmation -->
+<div id="exitModal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="exit-title">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="exit-title">Leave control panel?</h5>
+      </div>
+      <div class="modal-body">
+        The farm keeps running on its schedule. Your control session will be released.
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="exit-stay-btn">Stay</button>
+        <button class="btn btn-danger" id="exit-leave-btn">Leave</button>
       </div>
     </div>
   </div>

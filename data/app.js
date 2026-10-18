@@ -163,14 +163,20 @@ function hhmmss(totalSeconds) {
 
 function timeToSeconds(hhmm) {
   if (!hhmm || hhmm === '--:--') return 0;
-  const parts = hhmm.split(':');
-  return (parseInt(parts[0]) || 0) * 3600 + (parseInt(parts[1]) || 0) * 60;
+  const parts = hhmm.split(':');   // HH:MM or HH:MM:SS
+  return (parseInt(parts[0]) || 0) * 3600 + (parseInt(parts[1]) || 0) * 60 +
+         (parseInt(parts[2]) || 0);
 }
 
 function secondsToHHMM(sec) {
   const h = String(Math.floor(sec / 3600)).padStart(2, '0');
   const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
   return `${h}:${m}`;
+}
+
+// Duration with seconds (custom repeat: e.g. pump 10 s on)
+function secondsToHHMMSS(sec) {
+  return hhmmss(sec || 0);
 }
 
 
@@ -212,11 +218,11 @@ function requestTaskStart() {
   }
 
   $.ajax({
-    url: "/task/start",
+    url: "/preset/start",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({
-      index: Number($("#taskSelect").val()),
+      id: Number($("#taskSelect").val()),
       startTime: localStart   // sent to sync device RTC
     }),
     success: resp => {
@@ -227,7 +233,7 @@ function requestTaskStart() {
       updateTaskUI(taskStatus);  // now shows "Running since: <device time>"
 	  updateScheduleHeader();
     },
-    error: xhr => console.warn("/task/start failed:", xhr.status)
+    error: xhr => console.warn("/preset/start failed:", xhr.status)
   });
 }
 
@@ -238,7 +244,7 @@ function requestTaskPause() {
     return;
   }
 
-  taskApiRequest("/task/pause", resp => {
+  taskApiRequest("/preset/pause", resp => {
     taskStatus = resp.status || "paused";
     taskStartTime = resp.startTime || resp.time || null;
     renderDashboard(resp);
@@ -253,7 +259,7 @@ function requestTaskResume() {
     return;
   }
 
-  taskApiRequest("/task/resume", resp => {
+  taskApiRequest("/preset/resume", resp => {
     taskStatus = resp.status || "running";
     taskStartTime = resp.startTime || resp.time || null;
     renderDashboard(resp);
@@ -269,7 +275,7 @@ function requestTaskStop() {
     return;
   }
 
-  taskApiRequest("/task/stop", resp => {
+  taskApiRequest("/preset/stop", resp => {
     taskStatus = resp.status || "stopped";
     taskStartTime = null;
     renderDashboard(resp);
@@ -285,6 +291,7 @@ const pageOrder = ["dashboard", "schedule", "playground", "settings"];
 let current = 0;
 let currentPage = "dashboard";
 let startX = 0;
+let startY = 0;
 let swipeEnabled = true;
 let sliderActive = false;
 
@@ -394,6 +401,7 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       if (!appReady) return;   // ← block early navigation
       showPage(el.dataset.page);
+      $('#mainNav').collapse('hide');   // close the mobile menu after choosing a screen
     });
   });
   
@@ -406,18 +414,25 @@ document.addEventListener("DOMContentLoaded", () => {
   /* SWIPE */
   document.addEventListener('touchstart', e => {
     startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
   });
 
   document.addEventListener('touchend', e => {
     if (sliderActive) return;
     if (!swipeEnabled) return;
 
-    // Prevent swipe from firing when tapping UI controls
-    if (e.target.closest('button, a, input, select, textarea, .play-slider')) {
+    // A swipe may start on a button or link (the browser cancels the click
+    // once the finger moves), but never on controls that are dragged
+    // themselves: sliders, text fields (text selection) and dropdowns.
+    if (e.target.closest('input, select, textarea, .play-slider')) {
       return;
     }
     if (!appReady) return;
     const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+
+    // Only mostly-horizontal movements count; vertical scrolling must not switch screens
+    if (Math.abs(endX - startX) <= Math.abs(endY - startY)) return;
 
     if (endX < startX - 50 && current < pageOrder.length - 1) {
       showPage(pageOrder[current + 1]);
@@ -429,6 +444,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener('keydown', e => {
     if (!swipeEnabled) return;
     if (!appReady) return;
+    // Arrow keys move the cursor inside text fields - never switch screens then
+    if (e.target.closest('input, textarea, select, [contenteditable]')) return;
     if (e.key === "ArrowRight" && current < pageOrder.length - 1) {
       showPage(pageOrder[current + 1]);
     } else if (e.key === "ArrowLeft" && current > 0) {
@@ -446,9 +463,8 @@ function loadTaskContent(index) {
     renderSchedule(taskContent);
     return;
   }
-  $.getJSON(`/task/content?index=${index}`, data => {
-    taskContent = data.schedule;
-    renderSchedule(taskContent);
+  $.getJSON(`/preset/content?id=${index}`, data => {
+    showPresetSchedule(data);
   });
 }
 
@@ -496,25 +512,31 @@ function initDashboard() {
   }
 
   // ONLINE MODE
-  $.getJSON("/tasks", raw => {
+  // Output rows depend only on the channel configuration, so build them
+  // right away: a failing or slow task list must not leave Outputs empty.
+  buildDashboard();
+  fetchState();
 
-    // Normalize backend → frontend
-    const tasks = (raw.tasks || []).map(t => ({
-      index: t.index,
-      name: t.name
+  $.getJSON("/preset/list", raw => {
+
+    // Normalize backend presets → frontend task list.
+    // Preset 0 is the built-in template ("Default").
+    const tasks = (raw.presets || []).map(p => ({
+      index: p.id,
+      name: p.name,
+      builtIn: !!p.builtIn
     }));
- 
     taskList = tasks;
-    const currentTask = tasks.find(t => t.name === raw.current?.name);
 
-    // Use backend task index OR fallback to first task
-    taskIndex = currentTask ? currentTask.index : tasks[0]?.index;
+    // Status + start time ("frozen" is shown like "paused")
+    const status = raw.current?.status || "stopped";
+    taskStatus = (status === "frozen") ? "paused" : status;
+    taskStartTime = raw.current?.startTime || null;
 
-
-
-  // Status + start time
-  taskStatus = raw.current?.status || "not started";
-  taskStartTime = raw.current?.time || null;
+    // The running preset; otherwise the first user preset; the template
+    // only when the user has no presets of his own
+    const running = (taskStatus === "running" || taskStatus === "paused");
+    taskIndex = running ? raw.current.presetId : defaultTaskIndex();
 
       
     // Populate dropdown
@@ -527,13 +549,21 @@ function initDashboard() {
 
     // Update UI
     updateTaskUI(taskStatus);
+    updateScheduleHeader();
     loadTaskContent(taskIndex);
     initTaskControlUI();
-	buildDashboard();
-	fetchState();
-    // Load schedule for selected task
+  })
+  .fail(xhr => {
+    console.warn("Failed to load /preset/list:", xhr.status);
+    $("#taskSelectLabel").text("Task list unavailable");
   });
   console.log("Dashboard init");
+}
+
+// First user preset, or the template (0) when there is none
+function defaultTaskIndex() {
+  const own = taskList.find(t => t.index !== 0);
+  return own ? own.index : 0;
 }
 
 let dashboardTimer = null;
@@ -1095,7 +1125,9 @@ function convertFromMs(ms) {
 function updateScheduleHeader() {
   const task = taskList.find(t => t.index === taskIndex);
   const name = task ? task.name : "--";
-  $("#schedule-task-name").text(name);
+  $("#schedule-task-name").text(taskIndex === 0 ? name + " (template)" : name);
+  // The template cannot be deleted
+  $("#delete-btn").prop("disabled", !task || taskIndex === 0);
 }
 
 // ---------------------------------------------------------
@@ -1271,6 +1303,8 @@ function bindScheduleUI() {
   $('#add-btn').on('click', addNewScheduleItem);
   $('#apply-btn').on('click', applyScheduleToServer);
   $('#cancel-btn').on('click', loadScheduleFromTask);
+  $('#delete-btn').on('click', showDeleteDialog);
+  $('#delete-confirm').on('click', deleteCurrentTask);
 }
 
 // ---------------------------------------------------------
@@ -1290,11 +1324,21 @@ function loadScheduleFromTask() {
   }
 
   // ONLINE MODE
-  $.getJSON(`/task/content?index=${taskIndex}`, data => {
-    currentTaskName = data.name;
-    taskContent = Array.isArray(data.schedule) ? data.schedule : [];
-    renderSchedule(taskContent);
-  });
+  $.getJSON(`/preset/content?id=${taskIndex}`, showPresetSchedule);
+}
+
+// Show a preset from /preset/content in the tree.
+// Plant presets (described by growth "phases") can be started from the
+// dashboard but cannot be edited here.
+function showPresetSchedule(data) {
+  currentTaskName = data.name;
+  taskContent = Array.isArray(data.schedule) ? data.schedule : [];
+  renderSchedule(taskContent);
+  if (!Array.isArray(data.schedule) && Array.isArray(data.phases)) {
+    $('#schedule-tree').html(
+      '<p class="text-muted m-2">This is a plant preset made of growth phases. ' +
+      'It can be started from the Dashboard but not edited here.</p>');
+  }
 }
 
 // ---------------------------------------------------------
@@ -1343,9 +1387,10 @@ function openBatchModal($row, newGroupId) {
   $('#batch-repeat').val(repeat);
 
   if (repeat === 'custom') {
-    // Show durations as HH:MM
-    $('#batch-time-on').val(secondsToHHMM(onSec));
-    $('#batch-time-off').val(secondsToHHMM(offSec));
+    // Show durations as HH:MM:SS (seconds matter for short pump runs)
+    updateBatchTimeFields(repeat);
+    $('#batch-time-on').val(secondsToHHMMSS(onSec));
+    $('#batch-time-off').val(secondsToHHMMSS(offSec));
   } else if (repeat === 'daily') {
     $('#batch-time-on').val(timeOn);
     $('#batch-time-off').val(timeOff);
@@ -1378,6 +1423,8 @@ function openBatchModal($row, newGroupId) {
 }
 
 function updateBatchTimeFields(repeat) {
+  // Durations need seconds; clock times do not
+  $('#batch-time-on, #batch-time-off').attr('step', repeat === 'custom' ? 1 : 60);
   if (repeat === 'daily') {
     $('#batch-time-on-label').text('Time On');
     $('#batch-time-on-group').show();
@@ -1463,7 +1510,7 @@ function saveBatchItem() {
   const timeOn = $on.val();
   const timeOff = $off.val() || '--:--';
 
-  // Custom: derive on/off seconds from HH:MM duration inputs
+  // Custom: derive on/off seconds from HH:MM:SS duration inputs
   const onTotal = isCustom ? timeToSeconds(timeOn) : 0;
   const offTotal = isCustom ? timeToSeconds(timeOff) : 0;
 
@@ -1479,14 +1526,21 @@ function saveBatchItem() {
       ? ($(`#batch-toggle-${cfg.id}`).is(':checked') ? 100 : 0)
       : (parseInt($(`.batch-duty-input[data-channel="${cfg.id}"]`).val()) || 0);
 
+    // A channel left at 0 that was not in the group before is not part of it.
+    // Without this, every batch adds 0-duty events for ALL outputs and e.g. a
+    // light group would switch the pump off at its start time.
+    const prev = existingEvents.find(ev => ev.channelId == cfg.id);
+    if (duty <= 0 && !prev) return;
+
     const base = {
       groupId: currentBatchGroupId,
       channelId: cfg.id,
       afterDays: parseInt($('#batch-after-days').val()) || 0,
       expireAfterDays: parseInt($('#batch-expire').val()) || 0,
       repeat: repeat,
-      rise: cfg.riseDefault || 0,
-      fall: cfg.fallDefault || 0,
+      // keep ramps already set for this channel (e.g. 2 min from the template)
+      rise: prev ? (prev.rise || 0) : (cfg.riseDefault || 0),
+      fall: prev ? (prev.fall || 0) : (cfg.fallDefault || 0),
       enabled: true
     };
 
@@ -1642,6 +1696,10 @@ function showSaveAsDialog() {
       $('#save-as-error').text('Please enter a task name.').show();
       return;
     }
+    if (name.toLowerCase() === 'default') {
+      $('#save-as-error').text('"Default" is the name of the template. Please choose another name.').show();
+      return;
+    }
     $('#saveAsModal').modal('hide');
     const nameChanged = (name !== currentTaskName);
     const isDefaultTask = (taskIndex === 0);
@@ -1666,24 +1724,21 @@ function sendScheduleToServer(index, name) {
     console.log("Saved locally (offline mode)");
     return;
   }
-  // Force new task creation if saving default
-  const effectiveIndex = (name === "Default") ? 0 : index;
+  // id 0 asks the controller for a new preset number
   $.ajax({
-    url: "/task/save",
+    url: "/preset/save",
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({
-      index: effectiveIndex,
-      name: name,
-      schedule: taskContent
+      preset: { id: index, name: name, schedule: taskContent }
     }),
     success: resp => {
-      console.log("Task saved:", resp);
+      console.log("Preset saved:", resp);
+      currentTaskName = resp.name || name;
 
-      // If backend assigned a new index, update frontend state
-      if (resp.index && resp.index !== taskIndex) {
-        taskIndex = resp.index;
-        currentTaskName = resp.name;
+      // If backend assigned a new id, update frontend state
+      if (resp.id && resp.id !== taskIndex) {
+        taskIndex = resp.id;
 
         // Add to dropdown if not already there
         const exists = $(`#taskSelect option[value="${taskIndex}"]`).length > 0;
@@ -1700,7 +1755,56 @@ function sendScheduleToServer(index, name) {
         updateTaskUI(taskStatus);
       }
     },
-    error: xhr => console.warn("/task/save failed:", xhr.status)
+    error: xhr => {
+      console.warn("/preset/save failed:", xhr.status, xhr.responseText);
+      alert("Saving failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+    }
+  });
+}
+
+// ---------------------------------------------------------
+// DELETE PRESET
+// ---------------------------------------------------------
+function showDeleteDialog() {
+  if (taskIndex === 0) return;   // the template cannot be deleted
+  const running = (taskStatus === 'running' || taskStatus === 'paused');
+  $('#delete-task-name').text(currentTaskName || '');
+  $('#delete-running-hint').toggle(running);
+  $('#deleteModal').modal({ backdrop: 'static', keyboard: false });
+  $('#deleteModal').modal('show');
+}
+
+function deleteCurrentTask() {
+  const id = taskIndex;
+  $('#deleteModal').modal('hide');
+  $.ajax({
+    url: "/preset/delete",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ id: id }),
+    success: () => {
+      // Forget the preset and show the next one (the template if none left)
+      taskList = taskList.filter(t => t.index !== id);
+      $(`#taskSelect option[value="${id}"]`).remove();
+      if (!taskList.some(t => t.index === 0)) {
+        taskList.unshift({ index: 0, name: 'Default', builtIn: true });
+        $('#taskSelect').prepend('<option value="0">Default</option>');
+      }
+      if (taskStatus === 'running' || taskStatus === 'paused') {
+        // The controller stopped it
+        taskStatus = 'stopped';
+        taskStartTime = null;
+      }
+      taskIndex = defaultTaskIndex();
+      $('#taskSelect').val(taskIndex);
+      updateTaskUI(taskStatus);
+      updateScheduleHeader();
+      loadScheduleFromTask();
+    },
+    error: xhr => {
+      console.warn("/preset/delete failed:", xhr.status, xhr.responseText);
+      alert("Deleting failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+    }
   });
 }
 
@@ -1996,14 +2100,14 @@ function sendPlaygroundParams(id, rise, fall, ontime, offtime) {
 /* ============================================================
    SETTINGS PAGE
    Endpoints used:
-     GET  /api/settings  → { ap_ssid, ap_auth, sta_ssid, sta_saved, sta_connected }
-     POST /api/settings  → { ap_ssid?, ap_pass?, sta_ssid?, sta_pass? }
-                        ← { status:"ok", restart:true }
-     GET  /wifi/scan     → { networks:[{ssid,rssi,security}] }
-     POST /wifi/disconnect → { status:"disconnected" }
+     GET  /api/settings  -> { ap_ssid, ap_auth, sta_ssid, sta_saved, sta_connected }
+     POST /api/settings  -> { ap_ssid?, ap_pass?, sta_ssid?, sta_pass? }
+                        <- { status:"ok", restart:true }
+     GET  /wifi/scan     -> { networks:[{ssid,rssi,security}] }
+     POST /wifi/disconnect -> { status:"disconnected" }
    ============================================================ */
 
-/* ── init (called once when page is first shown) ──────────────────────────── */
+/* init (called once when page is first shown) */
 function initSettings() {
   /* password eye toggles */
   document.getElementById("ap-pass-toggle").addEventListener("click", () =>
@@ -2021,13 +2125,13 @@ function initSettings() {
   document.getElementById("settings-save-btn").addEventListener("click", saveSettings);
 }
 
-/* ── run (called every time page becomes active) ──────────────────────────── */
+/* run (called every time page becomes active) */
 function runSettingsWorkflow() {
   _settingsStatus("", "");       // clear previous message
   loadSettingsData();
 }
 
-/* ── load current values from firmware ───────────────────────────────────── */
+/* load current values from firmware */
 function loadSettingsData() {
   if (OFFLINE_MODE) {
     /* fill demo values so UI is usable offline */
@@ -2040,14 +2144,14 @@ function loadSettingsData() {
   $.getJSON("/api/settings")
     .done(d => {
       document.getElementById("ap-ssid").value = d.ap_ssid || "";
-      /* passwords are never returned — leave blank */
+      /* passwords are never returned - leave blank */
       document.getElementById("sta-ssid").value = d.sta_ssid || "";
       _showStaSaved(!!d.sta_saved, !!d.sta_connected);
     })
     .fail(() => _settingsStatus("Could not load settings.", "danger"));
 }
 
-/* ── wifi scan ───────────────────────────────────────────────────────────── */
+/* wifi scan */
 function runWifiScan() {
   const btn = document.getElementById("wifi-scan-btn");
   btn.disabled = true;
@@ -2090,7 +2194,7 @@ function runWifiScan() {
     });
 }
 
-/* ── disconnect STA ──────────────────────────────────────────────────────── */
+/* disconnect STA */
 function staDisconnect() {
   if (!confirm("Disconnect from home network?")) return;
 
@@ -2105,7 +2209,7 @@ function staDisconnect() {
     .fail(() => _settingsStatus("Disconnect failed.", "danger"));
 }
 
-/* ── save & restart ──────────────────────────────────────────────────────── */
+/* save & restart */
 function saveSettings() {
   const apSsid  = document.getElementById("ap-ssid").value.trim();
   const apPass  = document.getElementById("ap-pass").value;
@@ -2167,7 +2271,7 @@ function saveSettings() {
   });
 }
 
-/* ── private helpers ─────────────────────────────────────────────────────── */
+/* private helpers */
 function _togglePass(inputId, btnId) {
   const inp = document.getElementById(inputId);
   const btn = document.getElementById(btnId);
@@ -2235,3 +2339,191 @@ document.getElementById("footer-next").addEventListener("click", e => {
   if (idx < pageOrder.length - 1) showPage(pageOrder[idx + 1]);
 });
 
+/* ============================================================
+   SESSION WATCH
+   - Keeps the control session alive while the user is actually using the
+     page (a heartbeat is sent only after recent taps or key presses), so an
+     idle user still times out after 5 minutes.
+   - Detects that the session was lost (timed out, taken by another user)
+     and stops the page instead of letting it send commands.
+   - Checks immediately when the page becomes visible again, because a
+     sleeping phone pauses all timers.
+   Depends on: OFFLINE_MODE, appReady, currentPage (app.js),
+               exitGuardLeaving (exitguard.js).
+   ============================================================ */
+
+const SESSION_CHECK_MS  = 15000;  // how often the page checks its session
+const USER_ACTIVE_MS    = 60000;  // taps within this window count as activity
+
+let sessionLost = false;
+let lastUserActionMs = Date.now();
+
+['pointerdown', 'keydown'].forEach(type =>
+  document.addEventListener(type, () => { lastUserActionMs = Date.now(); }, true));
+
+function showSessionLost() {
+  if (sessionLost || OFFLINE_MODE) return;
+  sessionLost = true;
+  appReady = false;                  // block navigation and commands
+  currentPage = 'lost';              // stops the dashboard polling loop
+  exitGuardLeaving = true;           // no "leave site?" prompts from now on
+  $('.modal.show').modal('hide');
+  $('body').append(
+    '<div class="exit-done">' +
+    '<h5>Session ended</h5>' +
+    '<p>Your control session has ended after a period of inactivity. ' +
+    'Another user may be controlling the farm now.</p>' +
+    '<a class="btn btn-primary" href="/">Reconnect</a>' +
+    '</div>');
+}
+
+// Any request rejected by the controller as "not your session"
+$(document).ajaxError((event, xhr) => {
+  if (xhr.status === 403) showSessionLost();
+});
+
+// Session check. An active user sends a heartbeat (POST keeps the session
+// alive), an idle user only asks (GET does not extend the session).
+function checkSession() {
+  if (sessionLost || OFFLINE_MODE || !appReady) return;
+
+  const active = Date.now() - lastUserActionMs < USER_ACTIVE_MS;
+  const request = active
+    ? $.ajax({ url: '/api/ping', type: 'POST', dataType: 'json', timeout: 5000 })
+    : $.ajax({ url: '/api/session', dataType: 'json', timeout: 5000 });
+
+  request.done(d => {
+    if (d && d.owner === false) showSessionLost();
+  });
+  // Network errors (phone still reconnecting to Wi-Fi) are ignored:
+  // the next check or a rejected command will tell.
+}
+
+setInterval(checkSession, SESSION_CHECK_MS);
+
+// A sleeping phone pauses all timers. Check at once when the page comes back
+// (screen unlocked, tab switched back, restored from history, Wi-Fi back),
+// instead of showing stale data until the next scheduled check.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkSession();
+});
+window.addEventListener('pageshow', checkSession);
+window.addEventListener('online', checkSession);
+/* ============================================================
+   EXIT GUARD
+   Keeps a back gesture / back button inside the app:
+     - closes an open dialog first,
+     - otherwise steps back one screen (Settings -> Playground -> ...),
+     - on Dashboard asks for confirmation before leaving.
+   Also blocks pull-to-refresh and reload/close without confirmation
+   (browsers show their own wording for the latter).
+   Depends on: showPage, current, currentPage, pageOrder, appReady (app.js).
+   ============================================================ */
+
+let exitGuardArmed = false;   // a guard history entry is on top of the stack
+let exitGuardLeaving = false; // user confirmed leaving — stop intercepting
+
+function armExitGuard() {
+  if (exitGuardArmed || exitGuardLeaving) return;
+  history.pushState({ spaGuard: true }, '');
+  exitGuardArmed = true;
+}
+
+// Browsers ignore history entries added without a user gesture when the user
+// presses Back, so the guard is armed on the first real interaction.
+function armExitGuardOnInteraction() {
+  const arm = () => {
+    armExitGuard();
+    document.removeEventListener('click', arm, true);
+    document.removeEventListener('keyup', arm, true);
+  };
+  // 'click'/'keyup' fire after the tap or key press is finished, so arming never
+  // interferes with focusing a text field or opening the on-screen keyboard
+  document.addEventListener('click', arm, true);
+  document.addEventListener('keyup', arm, true);
+}
+
+window.addEventListener('popstate', () => {
+  if (exitGuardLeaving) return;
+  exitGuardArmed = false;              // the guard entry has just been consumed
+
+  // 1. An open dialog: Back closes it
+  const $openModal = $('.modal.show');
+  if ($openModal.length) {
+    $openModal.modal('hide');          // on the exit dialog this means "Stay"
+    armExitGuard();
+    return;
+  }
+
+  // 2. Not on the first screen: Back goes one screen back
+  if (appReady && current > 0) {
+    showPage(pageOrder[current - 1]);
+    armExitGuard();
+    return;
+  }
+
+  // 3. On Dashboard: ask before leaving. The guard is re-armed right away, so
+  //    another Back while the dialog is open just closes it ("Stay").
+  armExitGuard();
+  showExitDialog();
+});
+
+function showExitDialog() {
+  $('#exitModal').modal({ backdrop: 'static', keyboard: true });
+  $('#exitModal').modal('show');
+}
+
+function leaveApp() {
+  exitGuardLeaving = true;
+  appReady = false;             // block navigation
+  currentPage = 'exit';         // stops the dashboard polling loop
+  $('#exitModal').modal('hide');
+
+  // Release the control session FIRST and wait for the controller's answer.
+  // A request fired while the page is already navigating away can be dropped,
+  // and then the next visit sees "busy" until the 5-minute timeout.
+  if (OFFLINE_MODE) {
+    finishLeaving();
+    return;
+  }
+  $.ajax({ url: '/api/release', type: 'POST', timeout: 2000 })
+    .always(finishLeaving);
+}
+
+function finishLeaving() {
+  // Leave to the previous site if there is one; a captive-portal window or a
+  // directly opened tab has nowhere to go back to, so show a final message.
+  // Skip the guard entry and the app's own entry in one step.
+  history.go(exitGuardArmed ? -2 : -1);
+  setTimeout(() => {
+    $('body').append(
+      '<div class="exit-done">' +
+      '<h5>Session closed</h5>' +
+      '<p>You can close this window now.</p>' +
+      '<a class="btn btn-primary" href="/">Open control panel again</a>' +
+      '</div>');
+  }, 400);
+}
+
+// Reload, closing the tab or typing another address
+window.addEventListener('beforeunload', e => {
+  if (exitGuardLeaving || !appReady) return;
+  e.preventDefault();
+  e.returnValue = '';                  // required by Chrome to show the prompt
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  armExitGuardOnInteraction();
+
+  $('#exit-stay-btn').on('click', () => {
+    $('#exitModal').modal('hide');
+  });
+  $('#exit-leave-btn').on('click', leaveApp);
+
+  // Whenever the exit dialog closes without leaving, put the guard back
+  $('#exitModal').on('hidden.bs.modal', () => {
+    if (!exitGuardLeaving) armExitGuard();
+  });
+  $('#exitModal').on('shown.bs.modal', disableSwipe);
+  $('#exitModal').on('hidden.bs.modal', enableSwipe);
+});
