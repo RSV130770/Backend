@@ -2,12 +2,27 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 
+// Set to 0 to silence the web-server diagnostics on the serial port.
+#define SITE_DEBUG 1
+#if SITE_DEBUG
+  #define SITE_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+  #define SITE_LOG(...)
+#endif
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Session state
 // ─────────────────────────────────────────────────────────────────────────────
 
 String sessionToken = "";          // empty = no active session
 unsigned long lastActivityMs = 0;  // millis() of last authorised request
+
+// A claimed session counts only after the page has actually started: the app
+// calls GET /api/ping right after loading. A client that loads "/" but never
+// pings (an old tab, a background loader) loses the claim after 10 s.
+static bool          sessionConfirmed   = false;
+static unsigned long sessionClaimedMs   = 0;
+static const unsigned long SESSION_CONFIRM_MS = 10000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Async WiFi scan state
@@ -77,21 +92,43 @@ void claimSession(AsyncWebServerRequest *req) {
     lastActivityMs = millis();
     return;
   }
-  sessionToken   = generateRandomKey(16);
-  lastActivityMs = millis();
+  sessionToken     = generateRandomKey(16);
+  lastActivityMs   = millis();
+  sessionConfirmed = false;
+  sessionClaimedMs = millis();
   Serial.println("Session claimed, token=" + sessionToken);
+}
+
+// Use at the start of every handler that CHANGES something on the farm.
+// Only the session owner may control the device; anyone else gets 403, which
+// makes a stale page (e.g. a user who timed out) show "Session ended".
+bool requireSession(AsyncWebServerRequest *req) {
+  if (isAuthorized(req)) {
+    lastActivityMs = millis();
+    return true;
+  }
+  SITE_LOG("Rejected %s: not the session owner\n", req->url().c_str());
+  req->send(403, "application/json", "{\"error\":\"not session owner\"}");
+  return false;
 }
 
 void releaseSession() {
   Serial.println("Session released");
-  sessionToken = "";
-  lastActivityMs = 0;
+  sessionToken     = "";
+  lastActivityMs   = 0;
+  sessionConfirmed = false;
 }
 
 // Called every second (from Ticker / loop).
-// Expires the session after SESSION_TIMEOUT_MS of inactivity.
+// Drops a claim the page never confirmed, and expires the session after
+// SESSION_TIMEOUT_MS of inactivity.
 void tickSession() {
   if (sessionFree()) return;
+  if (!sessionConfirmed && millis() - sessionClaimedMs >= SESSION_CONFIRM_MS) {
+    Serial.println("Session not confirmed by the page - released");
+    releaseSession();
+    return;
+  }
   unsigned long idle = millis() - lastActivityMs;
   if (idle >= SESSION_TIMEOUT_MS) {
     Serial.printf("Session timed out after %lu ms idle\n", idle);
@@ -117,6 +154,14 @@ static void attachCookie(AsyncWebServerResponse *res) {
   res->addHeader("Set-Cookie",
     "session=" + sessionToken
     + "; Path=/; HttpOnly; SameSite=Lax");
+}
+
+// Browsers and portal windows identify themselves as "Mozilla/5.0 ...".
+// System connectivity checks (Android "Dalvik", iOS "CaptiveNetworkSupport",
+// Windows NCSI ...) do not, and must never get the session.
+static bool isBrowser(AsyncWebServerRequest *req) {
+  if (!req->hasHeader("User-Agent")) return false;
+  return req->header("User-Agent").indexOf("Mozilla") >= 0;
 }
 
 // ─── Busy page ─────────────────────────────────────────────────────────────────
@@ -164,6 +209,37 @@ poll();
 </html>
 )rawliteral";
 
+// Landing page for the phone's captive-portal check. It must NOT claim the
+// session: the system loads it on its own, often in a separate window.
+static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniFarm</title>
+<style>
+  body { font-family: sans-serif; background: #f8f9fa; margin: 0;
+         padding: 20vh 16px 0; text-align: center; color: #212529; }
+  a { display: inline-block; margin-top: 16px; padding: 14px 24px;
+      background: #007bff; color: #fff; border-radius: 8px;
+      text-decoration: none; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+  <h2>MiniFarm</h2>
+  <p>You are connected to the farm.</p>
+  <a href="http://192.168.4.1/">Open control panel</a>
+</body>
+</html>
+)rawliteral";
+
+static void sendPortal(AsyncWebServerRequest *req) {
+  AsyncWebServerResponse *res = req->beginResponse_P(200, "text/html", PORTAL_HTML);
+  res->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  req->send(res);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Route setup
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +270,14 @@ void handleSite() {
 
   // Root / index.html
   auto serveIndex = [](AsyncWebServerRequest *req) {
+    // A system connectivity check gets the portal page, never the session
+    if (!isBrowser(req)) {
+      SITE_LOG("INDEX: system check, portal page served\n");
+      sendPortal(req);
+      return;
+    }
+    SITE_LOG("INDEX: browser, authorized=%d free=%d\n", isAuthorized(req), sessionFree());
+
     if (isAuthorized(req)) {
       lastActivityMs = millis();
       req->send(SPIFFS, "/index.html", "text/html");
@@ -212,6 +296,9 @@ void handleSite() {
 
   server.on("/",           HTTP_GET, serveIndex);
   server.on("/index.html", HTTP_GET, serveIndex);
+
+  // Captive-portal landing page (CaptiveRequestHandler redirects here)
+  server.on("/portal", HTTP_GET, sendPortal);
 
   server.on("/busy", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->send_P(200, "text/html", BUSY_HTML);
@@ -242,17 +329,30 @@ void handleSite() {
     json += busy ? "true" : "false";
     json += ",\"remainSec\":";
     json += String(remain);
+    json += ",\"owner\":";                   // does this page hold the session?
+    json += isAuthorized(req) ? "true" : "false";
     json += "}";
     req->send(200, "application/json", json);
   });
 
+  // The app calls this right after loading: it confirms the session
   server.on("/api/ping", HTTP_GET, [](AsyncWebServerRequest *req) {
+    if (isAuthorized(req)) {
+      if (!sessionConfirmed) SITE_LOG("Session confirmed by the page\n");
+      sessionConfirmed = true;
+      lastActivityMs   = millis();
+    }
     req->send(200, "application/json", "{\"status\":\"ok\"}");
   });
 
+  // Heartbeat from an active page: keeps the session alive and tells the page
+  // whether it still owns it
   server.on("/api/ping", HTTP_POST, [](AsyncWebServerRequest *req) {
-    if (isAuthorized(req)) lastActivityMs = millis();
-    req->send(200, "application/json", "{\"status\":\"ok\"}");
+    bool owner = isAuthorized(req);
+    if (owner) lastActivityMs = millis();
+    req->send(200, "application/json",
+              owner ? "{\"status\":\"ok\",\"owner\":true}"
+                    : "{\"status\":\"ok\",\"owner\":false}");
   });
 
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -435,5 +535,8 @@ void handleSite() {
       ESP.restart();
     });
 
-  server.serveStatic("/", SPIFFS, "/").setCacheControl("max-age=86400");
+  // "no-cache": the browser keeps the files but re-checks them on every load,
+  // so a new upload of the data folder is picked up immediately.
+  // For release builds "max-age=86400" loads faster.
+  server.serveStatic("/", SPIFFS, "/").setCacheControl("no-cache");
 }

@@ -83,6 +83,9 @@ public:
   void ToNextSwitch() const override;
   void toJson(JsonObject &o) const override;
   bool fromJson(const JsonObject &o) override;
+
+  // Move activation to the next HH:MM after now, without applying
+  void advanceToNext();
 };
 
 // --

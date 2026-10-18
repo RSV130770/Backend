@@ -4,6 +4,13 @@ DHTNEW dht(DHTPIN);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature waterTemperature(&oneWire);
 
+SensorState S;   // the single shared sensor state (declared extern in sensors.h)
+
+// Valid ranges (datasheets); readings outside them are rejected
+static const float DHT_TEMP_MIN = -40.0f, DHT_TEMP_MAX = 80.0f;    // DHT22 / AM2302
+static const float DHT_HUM_MIN  =   0.0f, DHT_HUM_MAX  = 100.0f;
+static const float DS_TEMP_MIN  = -55.0f, DS_TEMP_MAX  = 125.0f;   // DS18B20
+
 
 Sensor::Sensor(const String &n, uint32_t interval)
   : name(n), intervalMs(interval), lastUpdate(0), value(NAN), failCount(0) {}
@@ -19,12 +26,21 @@ void Sensor::update() {
 WaterTempSensor ::WaterTempSensor(DallasTemperature *d)
   : Sensor("waterTemp", 2000), ds(d) {}
 
+// Non-blocking: read the result of the conversion started on the previous
+// call, then start the next one. A blocking requestTemperatures() would stall
+// the timer task for ~750 ms on every read (and with it the other tickers).
 void WaterTempSensor ::read() {
-  ds->requestTemperatures();
   float t = ds->getTempCByIndex(0);
+  ds->requestTemperatures();          // returns at once (setWaitForConversion(false))
 
-  if (t < -100) {
-    if (++failCount > 10) value = NAN;
+  // -127 = DEVICE_DISCONNECTED_C; exactly 85.0 is the DS18B20 power-on value,
+  // returned when a conversion did not complete. Anything outside the sensor
+  // range is noise.
+  if (t < DS_TEMP_MIN || t > DS_TEMP_MAX || t == 85.0f) {
+    if (++failCount > 10) {
+      value = NAN;
+      S.waterTemp = NAN;              // show "NOK" instead of a stale value
+    }
     return;
   }
   value = t;
@@ -51,13 +67,35 @@ void DHTSensor::read() {
       case DHTLIB_ERROR_SENSOR_NOT_READY:
       case DHTLIB_ERROR_BIT_SHIFT:
       default:
-        if (++failCount > 10) value = NAN;
+        if (++failCount > 10) {
+          value = NAN;
+          lastTemp = NAN;
+          lastHum = NAN;
+          extractValue();             // publishes NAN -> page shows "NOK"
+        }
         return;
     }
   }
 
-  lastTemp = dht->getTemperature();
-  lastHum = dht->getHumidity();
+  float t = dht->getTemperature();
+  float h = dht->getHumidity();
+
+  // dhtnew returns -999 (DHTLIB_INVALID_VALUE) for a failed or not yet done
+  // reading, and a noisy line can produce garbage. Accept only values inside
+  // the DHT22 range; treat anything else as a failed read.
+  if (isnan(t) || isnan(h) ||
+      t < DHT_TEMP_MIN || t > DHT_TEMP_MAX ||
+      h < DHT_HUM_MIN  || h > DHT_HUM_MAX) {
+    if (++failCount > 10) {
+      value = NAN;
+      lastTemp = NAN;
+      lastHum = NAN;
+      extractValue();                 // publishes NAN -> page shows "NOK"
+    }
+    return;
+  }
+  lastTemp = t;
+  lastHum = h;
 
   float v = extractValue();
   if (isnan(v)) {
@@ -78,11 +116,17 @@ void LevelSensor ::read() {
   bool lo = digitalRead(pinLo);
   bool hi = digitalRead(pinHi);
 
-  if (lo && hi) S.level = 0;         // LOW
-  else if (lo && !hi) S.level = -1;  // NOK
-  else if (!lo && hi) S.level = 1;   // OK
-  else S.level = 2;                  // HIGH
-};
+  int level;
+  if (lo && hi) level = 0;           // LOW
+  else if (lo && !hi) level = -1;    // NOK (impossible float combination)
+  else if (!lo && hi) level = 1;     // OK
+  else level = 2;                    // HIGH
+
+  if (level != S.level) {
+    Serial.printf("Level: lo=%d hi=%d -> %d\n", lo, hi, level);
+  }
+  S.level = level;
+}
 
 
 AirTempSensor::AirTempSensor(DHTNEW *driver)
@@ -124,7 +168,16 @@ void updateSensors() {
 Ticker sensorsTicker;
 
 void setupSensors() {
+  // Level switches. Since arduino-esp32 3.x, digitalRead() on a pin that was
+  // never set up with pinMode() returns 0 (and logs "IO x is not set as GPIO"),
+  // so the level never changes. Use INPUT_PULLUP instead of INPUT if the
+  // switches pull to GND and the board has no external pull-up resistors.
+  pinMode(LEVEL_LO, INPUT);
+  pinMode(LEVEL_HI, INPUT);
+
   waterTemperature.begin();
+  waterTemperature.setWaitForConversion(false);   // see WaterTempSensor::read()
+  waterTemperature.requestTemperatures();         // first conversion
   //  dht.begin();
   sensorsTicker.attach_ms(200, []() {
     updateSensors();

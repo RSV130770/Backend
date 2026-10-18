@@ -5,8 +5,10 @@ uint32_t freezeEntryEpoch;   // when freeze began
 //---
 // MachineEvent::toJson / fromJson (common fields)
 //---
+// JSON units (same as the web editor): duty in percent, rise/fall in ms,
+// on/off in seconds, expireAfterDays = how many days the event is active.
 void MachineEvent::toJson(JsonObject &o) const {
-  o["long"] = durationDays;
+  o["expireAfterDays"] = durationDays;
   o["channelId"] = channelId;
   // UI-friendly time string
   writeTime(o, hour, minute);
@@ -31,7 +33,8 @@ bool MachineEvent::fromJson(const JsonObject &o) {
   int pct = o["duty"] | 0;
   pct = std::clamp(pct, 0, 100);
   duty = (pct * 255) / 100;
-  durationDays = o["long"] | 0;
+  // "expireAfterDays" from the web editor; "long" from older files
+  durationDays = o["expireAfterDays"] | (int)(o["long"] | 0);
   return true;
 }
 void MachineEvent::ToNextSwitch() const {
@@ -53,14 +56,35 @@ void MachineEvent::ToNextSwitch() const {
 void DailyEvent::toJson(JsonObject &o) const {
   MachineEvent::toJson(o);
   o["repeat"] = "daily";
-  o["rise"] = rampMs / 1000;
-  o["fall"] = 0;
+  o["rise"] = rampMs;
+  o["fall"] = rampMs;
 }
 
 bool DailyEvent::fromJson(const JsonObject &o) {
   if (!MachineEvent::fromJson(o)) return false;
-  rampMs = (o["rise"] | 0) * 1000;
+  // A daily event has one ramp: an "off" event (duty 0) ramps down with
+  // "fall", any other event ramps with "rise"
+  uint32_t rise = o["rise"] | 0u;
+  uint32_t fall = o["fall"] | rise;
+  rampMs = (duty == 0) ? fall : rise;
   return true;
+}
+
+void DailyEvent::advanceToNext() {
+  tm t = NOW;
+  t.tm_hour = hour;
+  t.tm_min  = minute;
+  t.tm_sec  = 0;
+  time_t next = mktime(&t);
+  if (next <= (time_t)NOW_EPOCH) {
+    t = NOW;
+    t.tm_mday += 1;
+    t.tm_hour = hour;
+    t.tm_min  = minute;
+    t.tm_sec  = 0;
+    next = mktime(&t);
+  }
+  activationEpoch = next;
 }
 
 void DailyEvent::computeActivation() {
@@ -85,18 +109,10 @@ void DailyEvent::computeActivation() {
         return;
     }
 
-    // If today's event already passed → schedule for tomorrow
-    if (todayEvent <= NOW_EPOCH) {
-        tm tomorrow = NOW;
-        tomorrow.tm_mday += 1;
-        tomorrow.tm_hour = hour;
-        tomorrow.tm_min  = minute;
-        tomorrow.tm_sec  = 0;
-        activationEpoch = mktime(&tomorrow);
-        return;
-    }
-
-    // Otherwise schedule for today
+    // Otherwise today's time, even if it has already passed: the scheduler
+    // then applies the newest passed event of each channel (so after a
+    // reboot at noon the lights come back on instead of waiting for
+    // tomorrow) and moves the older ones to the next day.
     activationEpoch = todayEvent;
 }
 
@@ -151,16 +167,16 @@ void CustomEvent::toJson(JsonObject &o) const {
   o["repeat"] = "custom";
   o["on"] = onSeconds;
   o["off"] = offSeconds;
-  o["rise"] = riseMs / 1000;
-  o["fall"] = fallMs / 1000;
+  o["rise"] = riseMs;
+  o["fall"] = fallMs;
 }
 
 bool CustomEvent::fromJson(const JsonObject &o) {
   if (!MachineEvent::fromJson(o)) return false;
   onSeconds = o["on"] | 0;
   offSeconds = o["off"] | 0;
-  riseMs = (o["rise"] | 0) * 1000;
-  fallMs = (o["fall"] | 0) * 1000;
+  riseMs = o["rise"] | 0u;
+  fallMs = o["fall"] | 0u;
   return true;
 }
 
@@ -193,14 +209,14 @@ void CustomEvent::computeActivation() {
 void OnceEvent::toJson(JsonObject &o) const {
   MachineEvent::toJson(o);
   o["repeat"] = "once";
-  o["rise"] = rampMs / 1000;
+  o["rise"] = rampMs;
   o["fall"] = 0;
   o["enabled"] = enabled;
 }
 
 bool OnceEvent::fromJson(const JsonObject &o) {
   if (!MachineEvent::fromJson(o)) return false;
-  rampMs = (o["rise"] | 0) * 1000;
+  rampMs = o["rise"] | 0u;
   enabled = o["enabled"] | true;
   return true;
 }

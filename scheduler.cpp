@@ -44,6 +44,16 @@ static void computeAllActivationTimes() {
   }
 }
 
+// Daily events whose time has passed but that were not the newest for their
+// channel (e.g. the 06:30 "on" when it is already after the 22:30 "off")
+// must move to their next occurrence, or they would fire on the next tick.
+static void skipPassedDailyEvents(uint32_t effectiveNow) {
+  for (auto* ev : EVENTS) {
+    if (ev->type == EVENT_DAILY && ev->activationEpoch <= effectiveNow)
+      static_cast<DailyEvent*>(ev)->advanceToNext();
+  }
+}
+
 /*
 void debug_event_actuate(event &ev)
 {
@@ -114,6 +124,7 @@ static void retrospectiveApply() {
     Serial.printf("remaining[%d]   = %p\n", ch, evForRemaining);
     Serial.println();
   }
+  skipPassedDailyEvents(effectiveNow);
 
   Serial.print("RTC RAW: ");
   Serial.print(RTC.yyyy); Serial.print("-");
@@ -182,6 +193,7 @@ void schedulerTick() {
     MachineEvent* evForRemaining = bestFuture[ch] ? bestFuture[ch] : bestPast[ch];
     if (evForRemaining) evForRemaining->ToNextSwitch();
   }
+  skipPassedDailyEvents(effectiveNow);
 }
 
 // Wrapper for Ticker
@@ -192,13 +204,19 @@ static void schedulerTickWrapper() {
 // Start scheduler
 // -----------------------------
 void schedulerStart() {
-  schedulerStartEpoch = NOW_EPOCH;
+  schedulerStartAt(NOW_EPOCH, false);
+}
+
+void schedulerStartAt(uint32_t startEpoch, bool recovering) {
+  schedulerStartEpoch = startEpoch;
+  // Reset before the first apply: a value left from the previous preset
+  // would shift its schedule
+  if (!recovering) FROZEN_DAYS = 0;
+  freezeEntryEpoch = 0;
   computeAllActivationTimes();
   retrospectiveApply();
   schedulerTicker.detach();
   schedulerTicker.attach_ms(1000, schedulerTickWrapper);
-  FROZEN_DAYS = 0;
-  freezeEntryEpoch = 0;
   TASK_STATUS = T_START;
 }
 
@@ -270,6 +288,21 @@ void schedulerStop() {
 
 void buildEventsFromPreset(const JsonObject& preset) {
   deleteEvents();
+
+  // Event-list preset (made in the web schedule editor, and the built-in
+  // template): "schedule" is an array of events, see MachineEvent::fromJson
+  JsonArray schedule = preset["schedule"].as<JsonArray>();
+  if (!schedule.isNull()) {
+    for (JsonObject e : schedule) {
+      MachineEvent* ev = createEventFromJson(e);
+      if (ev) EVENTS.push_back(ev);
+    }
+    Serial.printf("Built %u events from schedule of preset %s\n",
+                  EVENTS.size(), preset["name"] | "unknown");
+    return;
+  }
+
+  // Otherwise a plant preset described by growth phases
 
   // Germination warning only
   uint8_t darkDays  = preset["germinationDarkDays"]  | 0;

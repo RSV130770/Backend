@@ -124,6 +124,8 @@ struct SensorState {
     uint8_t ah_fail = 0;
 
 };
-static SensorState S;
+// One shared instance, defined in sensors.cpp. ("static" here would give every
+// .cpp file that includes this header its own private, never-updated copy.)
+extern SensorState S;
 void fillDashboardState(JsonDocument &resp);
 #endif
