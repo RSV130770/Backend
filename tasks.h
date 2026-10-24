@@ -29,6 +29,7 @@ void handlePresetList(AsyncWebServerRequest *req);
 void handlePresetContent(AsyncWebServerRequest *req);
 void handlePresetSave(AsyncWebServerRequest *req, uint8_t *data, size_t len);
 void handlePresetDelete(AsyncWebServerRequest *req, uint8_t *data, size_t len);
+void handlePresetSelect(AsyncWebServerRequest *req, uint8_t *data, size_t len);
 void handlePresetStart(AsyncWebServerRequest *req, uint8_t *data, size_t len);
 void handlePresetStop(AsyncWebServerRequest *req);
 void handlePresetPause(AsyncWebServerRequest *req);

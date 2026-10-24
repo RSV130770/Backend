@@ -1,5 +1,6 @@
 #include "tasks.h"
 #include "scheduler.h"
+#include <algorithm>
 
 extern Output OUT[OUTPUT_COUNT];
 extern AsyncWebServer server;
@@ -31,11 +32,12 @@ static const uint32_t TPL_PUMP_ON_SEC  = 10;       // pump runs 10 s ...
 static const uint32_t TPL_PUMP_OFF_SEC = 60 * 60;  // ... then rests 60 min
 
 // One event in the web editor's format (see MachineEvent::fromJson)
-static JsonObject addTemplateEvent(JsonArray arr, uint8_t group, uint8_t ch,
+static JsonObject addTemplateEvent(JsonArray arr, uint8_t group, const char *groupName, uint8_t ch,
                                    const char *repeat, const char *time,
                                    uint8_t pct, uint32_t riseMs, uint32_t fallMs) {
   JsonObject e = arr.createNestedObject();
   e["groupId"]         = group;
+  e["groupName"]       = groupName;   // shown in the web editor, ignored here
   e["channelId"]       = ch;
   e["time"]            = time;
   e["afterDays"]       = 0;      // starts on the day the preset is started
@@ -60,14 +62,14 @@ static String buildTemplateJson() {
   // Group 1: all lights, daily on/off with a ramp
   const uint8_t lights[] = { ID_WHITE, ID_RED, ID_BLUE, ID_UV, ID_FARR };
   for (uint8_t ch : lights) {
-    addTemplateEvent(s, 1, ch, "daily", TPL_LIGHT_ON,  TPL_LIGHT_PCT,
+    addTemplateEvent(s, 1, "Light", ch, "daily", TPL_LIGHT_ON,  TPL_LIGHT_PCT,
                      TPL_LIGHT_RAMP_MS, TPL_LIGHT_RAMP_MS);
-    addTemplateEvent(s, 1, ch, "daily", TPL_LIGHT_OFF, 0,
+    addTemplateEvent(s, 1, "Light", ch, "daily", TPL_LIGHT_OFF, 0,
                      TPL_LIGHT_RAMP_MS, TPL_LIGHT_RAMP_MS);
   }
 
   // Group 2: pump cycle, starts as soon as the preset starts ("--:--")
-  JsonObject p = addTemplateEvent(s, 2, ID_PUMP, "custom", "--:--", 100, 0, 0);
+  JsonObject p = addTemplateEvent(s, 2, "Pump", ID_PUMP, "custom", "--:--", 100, 0, 0);
   p["on"]  = TPL_PUMP_ON_SEC;
   p["off"] = TPL_PUMP_OFF_SEC;
 
@@ -146,6 +148,7 @@ String taskStatusToString() {
 }
 
 void deleteEvents() {
+  schedulerForgetEvents();      // the scheduler keeps pointers into EVENTS
   for (auto *ev : EVENTS) delete ev;
   EVENTS.clear();
   Serial.println("All EVENTS cleared");
@@ -158,6 +161,12 @@ void deleteEvents() {
 // Writes the built-in template if /preset_000.json is missing or outdated
 void ensureDefaultPreset() {
   const char *path = "/preset_000.json";
+
+  // The full comparison (build + read ~2 KB) runs once per boot; after that
+  // only a missing file is recreated. This keeps the web handlers light.
+  static bool checked = false;
+  if (checked && SPIFFS.exists(path)) return;
+
   String tpl = buildTemplateJson();
 
   if (SPIFFS.exists(path)) {
@@ -165,7 +174,7 @@ void ensureDefaultPreset() {
     if (f) {
       bool same = (f.size() == tpl.length()) && (f.readString() == tpl);
       f.close();
-      if (same) return;
+      if (same) { checked = true; return; }
     }
   }
 
@@ -176,6 +185,7 @@ void ensureDefaultPreset() {
   }
   f.print(tpl);
   f.close();
+  checked = true;
   Serial.printf("Default template written (%u bytes)\n", tpl.length());
 }
 
@@ -219,14 +229,41 @@ bool loadPresetFromFile(uint8_t id, DynamicJsonDocument& doc) {
   return true;
 }
 
+// Numbers of all stored presets, sorted. One pass over the directory:
+// asking SPIFFS.exists() for 256 possible names takes seconds and blocks
+// the web server task.
+static std::vector<uint8_t> listPresetIds() {
+  std::vector<uint8_t> ids;
+  File root = SPIFFS.open("/");
+  if (!root) return ids;
+  File f = root.openNextFile();
+  while (f) {
+    const char *n = f.name();
+    if (*n == '/') n++;                      // older cores return "/name"
+    unsigned id = 0;
+    char tail[8] = "";
+    if (sscanf(n, "preset_%3u.%5s", &id, tail) == 2 &&
+        strcmp(tail, "json") == 0 && id <= 255)
+      ids.push_back((uint8_t)id);
+    f.close();
+    f = root.openNextFile();
+  }
+  root.close();
+  std::sort(ids.begin(), ids.end());
+  return ids;
+}
+
 // First unused preset number (1..255), 0 if all are taken
 static uint8_t findFreePresetId() {
-  char path[32];
-  for (uint16_t id = 1; id <= 255; id++) {
-    presetPath(id, path, sizeof(path));
-    if (!SPIFFS.exists(path)) return id;
+  std::vector<uint8_t> ids = listPresetIds();
+  uint8_t id = 1;
+  for (uint8_t used : ids) {
+    if (used < id) continue;
+    if (used > id) break;
+    if (id == 255) return 0;
+    id++;
   }
-  return 0;
+  return id;
 }
 
 // -------------------------
@@ -258,6 +295,7 @@ bool startFromPreset(uint8_t id, bool recover) {
     schedulerStartAt(startEpoch, true);
   } else {
     TASK_STATUS = T_START;
+    FREEZE_DONE = 0;              // a new run: no pause point confirmed yet
     PutStartTimetoRtc(NOW);
     saveTaskData();
     schedulerStart();
@@ -272,7 +310,11 @@ bool startFromPreset(uint8_t id, bool recover) {
 // paused/frozen state if it was paused.
 static bool continuePreset(uint8_t id, uint8_t status) {
   if (!startFromPreset(id, true)) return false;
-  if (status == T_PAUSE || status == T_FROZEN) {
+  if (status == T_FROZEN) {
+    // Waiting at a pause point: processes keep running, so the ticker stays
+    TASK_STATUS = status;
+    Serial.println("continuePreset: still waiting at a pause point");
+  } else if (status == T_PAUSE) {
     schedulerTicker.detach();
     TASK_STATUS = status;
     Serial.printf("continuePreset: restored to %s\n",
@@ -285,16 +327,31 @@ static bool continuePreset(uint8_t id, uint8_t status) {
 // Default task fallback
 // -------------------------
 
+// Loads a preset's events into memory without starting them
+static bool loadPresetEvents(uint8_t id) {
+  DynamicJsonDocument doc(PRESET_DOC_SIZE);
+  if (!loadPresetFromFile(id, doc)) return false;
+  buildEventsFromPreset(doc.as<JsonObject>());
+  Serial.printf("Preset %u loaded, not started (%u events)\n", id, EVENTS.size());
+  return true;
+}
+
 // Loads the template's events into memory without starting them
 void loadDefaultTask() {
   Serial.println("loadDefaultTask: loading preset_000");
-  DynamicJsonDocument doc(PRESET_DOC_SIZE);
-  if (loadPresetFromFile(0, doc)) {
-    buildEventsFromPreset(doc.as<JsonObject>());
-    Serial.printf("Default preset loaded (%u events)\n", EVENTS.size());
-  } else {
-    Serial.println("loadDefaultTask: preset_000 missing");
+  if (!loadPresetEvents(0)) Serial.println("loadDefaultTask: preset_000 missing");
+}
+
+// Loads the selected preset (number kept in RTC memory as PRESET_ID) without
+// starting it; falls back to the template if that preset no longer exists
+static void loadSelectedPreset() {
+  if (PRESET_ID != 0 && loadPresetEvents(PRESET_ID)) return;
+  if (PRESET_ID != 0) {
+    Serial.printf("Selected preset %u missing -> template\n", PRESET_ID);
+    PRESET_ID = 0;
+    saveTaskData();
   }
+  loadDefaultTask();
 }
 
 // -------------------------
@@ -321,8 +378,8 @@ void TryTaskStart() {
       saveTaskData();
     }
   } else {
-    // Stopped: just load the template's events into memory, don't start
-    loadDefaultTask();
+    // Stopped: load the last selected preset (or the template), don't start
+    loadSelectedPreset();
   }
 
   Serial.println("TryTaskStart done");
@@ -432,19 +489,58 @@ void handlePresetDelete(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   }
 
   // Deleting the running preset stops it first
-  if (id == PRESET_ID && TASK_STATUS != T_STOP) {
-    schedulerStop();
-    PRESET_ID = 0;
-    loadDefaultTask();
-  }
+  bool wasSelected = (id == PRESET_ID);
+  if (wasSelected && TASK_STATUS != T_STOP) schedulerStop();
 
   SPIFFS.remove(path);
   ensureDefaultPreset();
+
+  // The selected preset is gone: select the template
+  if (wasSelected) {
+    PRESET_ID = 0;
+    saveTaskData();
+    loadDefaultTask();
+  }
   Serial.printf("Preset %u deleted\n", id);
 
   StaticJsonDocument<128> resp;
   resp["status"] = "deleted";
   resp["id"]     = id;
+  String out;
+  serializeJson(resp, out);
+  req->send(200, "application/json", out);
+}
+
+// The user picked a preset in the dashboard box (nothing running): remember
+// it in RTC memory and load its events, so it survives a reboot
+void handlePresetSelect(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
+  StaticJsonDocument<64> doc;
+  if (deserializeJson(doc, data, len)) {
+    sendError(req, 400, "invalid json");
+    return;
+  }
+  uint8_t id = doc["id"] | 0;
+
+  if (TASK_STATUS != T_STOP) {
+    sendError(req, 409, "stop the running preset first");
+    return;
+  }
+  char path[32];
+  presetPath(id, path, sizeof(path));
+  if (id != 0 && !SPIFFS.exists(path)) {
+    sendError(req, 404, "preset not found");
+    return;
+  }
+
+  PRESET_ID = id;
+  saveTaskData();
+  deleteEvents();
+  loadSelectedPreset();
+  Serial.printf("Preset %u selected\n", id);
+
+  StaticJsonDocument<96> resp;
+  resp["status"]   = "selected";
+  resp["presetId"] = PRESET_ID;
   String out;
   serializeJson(resp, out);
   req->send(200, "application/json", out);
@@ -483,9 +579,11 @@ void handlePresetStart(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
 void handlePresetStop(AsyncWebServerRequest *req) {
   Serial.println("handlePresetStop start");
 
+  // The preset stays selected (PRESET_ID is kept in RTC memory), so the
+  // page and the next boot show it again; it is only no longer running
   schedulerStop();
-  PRESET_ID = 0;
   ClearStartTimeInRtc();
+  loadSelectedPreset();
 
   StaticJsonDocument<256> resp;
   resp["status"]    = taskStatusToString();
@@ -558,27 +656,34 @@ void handlePresetContent(AsyncWebServerRequest *req) {
 
 void handlePresetList(AsyncWebServerRequest *req) {
   Serial.println("handlePresetList start");
+  uint32_t t0 = millis();
   ensureDefaultPreset();
 
-  DynamicJsonDocument doc(8192);
+  // ~60 bytes per preset in the answer
+  DynamicJsonDocument doc(6144);
   JsonArray arr = doc.createNestedArray("presets");
+  if (doc.capacity() == 0) {
+    Serial.printf("handlePresetList: out of memory (free heap %u)\n", ESP.getFreeHeap());
+    sendError(req, 503, "out of memory");
+    return;
+  }
 
-  // Read only the descriptive fields; the schedule itself can be large
-  StaticJsonDocument<512> filter;
+  // Read only the descriptive fields; the schedule itself can be large.
+  // Both documents live on the heap: the web server task has a small stack.
+  DynamicJsonDocument filter(512);
   const char *fields[] = { "id", "name", "nameRu", "latin", "category",
                            "totalDays", "difficulty", "recommendedMethod",
                            "builtIn", "germinationDays" };
   for (const char *k : fields) filter[k] = true;
+  DynamicJsonDocument meta(1024);
 
-  for (uint16_t id = 0; id <= 255; id++) {
+  for (uint8_t id : listPresetIds()) {
     char path[32];
     presetPath(id, path, sizeof(path));
-    if (!SPIFFS.exists(path)) continue;
 
     File f = SPIFFS.open(path, "r");
     if (!f) continue;
-
-    StaticJsonDocument<1024> meta;
+    meta.clear();
     DeserializationError err =
       deserializeJson(meta, f, DeserializationOption::Filter(filter));
     f.close();
@@ -587,17 +692,13 @@ void handlePresetList(AsyncWebServerRequest *req) {
       continue;
     }
 
-    JsonObject o      = arr.createNestedObject();
-    o["id"]           = meta["id"]                | id;
-    o["name"]         = meta["name"]              | "";
-    o["nameRu"]       = meta["nameRu"]            | "";
-    o["latin"]        = meta["latin"]             | "";
-    o["category"]     = meta["category"]          | "";
-    o["totalDays"]    = meta["totalDays"]         | 0;
-    o["difficulty"]   = meta["difficulty"]        | "";
-    o["recommendedMethod"] = meta["recommendedMethod"] | "";
-    o["builtIn"]      = meta["builtIn"]           | false;
-    o["germinationDays"] = meta["germinationDays"]| 0;
+    // set() copies the strings; assigning meta["name"] directly would only
+    // store a pointer into meta, which is reused for the next file
+    JsonObject o = arr.createNestedObject();
+    o.set(meta.as<JsonObjectConst>());
+    o["id"] = id;                              // the file number counts
+    if (!o.containsKey("name"))    o["name"]    = "";
+    if (!o.containsKey("builtIn")) o["builtIn"] = false;
   }
 
   // Current running preset info
@@ -605,16 +706,25 @@ void handlePresetList(AsyncWebServerRequest *req) {
   cur["presetId"]  = PRESET_ID;
   cur["status"]    = taskStatusToString();
   cur["startTime"] = formatStartTime();
+  if (TASK_STATUS == T_FROZEN && activeFreeze)
+    cur["pauseMessage"] = activeFreeze->message;
 
-  String out;
-  serializeJson(doc, out);
-  req->send(200, "application/json", out);
-  Serial.println("handlePresetList done");
+  // Stream the answer instead of building a second copy in a String
+  AsyncResponseStream *res = req->beginResponseStream("application/json");
+  res->addHeader("Cache-Control", "no-store");
+  serializeJson(doc, *res);
+  req->send(res);
+  Serial.printf("handlePresetList done: %u presets, %lu ms, free heap %u\n",
+                arr.size(), (unsigned long)(millis() - t0), ESP.getFreeHeap());
 }
 
 void handleApiState(AsyncWebServerRequest *req) {
   StaticJsonDocument<1024> resp;
   fillDashboardState(resp);
+  // Task status for the page, and the message of a reached pause point
+  resp["taskStatus"] = taskStatusToString();
+  if (TASK_STATUS == T_FROZEN && activeFreeze)
+    resp["pauseMessage"] = activeFreeze->message;
   String out;
   serializeJson(resp, out);
   req->send(200, "application/json", out);
@@ -654,6 +764,17 @@ void setupTasks() {
       if (!body) return;
       if (!requireSession(req)) return;
       handlePresetDelete(req, body, total);
+    });
+
+  server.on("/preset/select", HTTP_POST,
+    [](AsyncWebServerRequest *req) {},
+    nullptr,
+    [](AsyncWebServerRequest *req, uint8_t *data, size_t len,
+       size_t index, size_t total) {
+      uint8_t *body = collectBody(req, data, len, index, total);
+      if (!body) return;
+      if (!requireSession(req)) return;
+      handlePresetSelect(req, body, total);
     });
 
   server.on("/preset/start", HTTP_POST,

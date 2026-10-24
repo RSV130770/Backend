@@ -10,6 +10,9 @@
   #define SITE_LOG(...)
 #endif
 
+unsigned long lastSeenMs = 0;   // millis() of the last request from the owner page
+static const unsigned long SESSION_GONE_MS = 90000;  // owner silent this long -> page closed
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Session state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +75,7 @@ bool sessionFree() {
 }
 
 bool isAuthorized(AsyncWebServerRequest *req) {
-  if (sessionFree()) return false;
+   if (sessionFree()) return false;
   if (!req->hasHeader("Cookie")) return false;
 
   String cookie = req->header("Cookie");
@@ -84,7 +87,10 @@ bool isAuthorized(AsyncWebServerRequest *req) {
                               : cookie.substring(start, end);
   token.trim();
 
-  return token == sessionToken;
+//  return token == sessionToken;
+ if (token != sessionToken) return false;
+  lastSeenMs = millis();        // the owner page is still there
+  return true;
 }
 
 void claimSession(AsyncWebServerRequest *req) {
@@ -97,6 +103,7 @@ void claimSession(AsyncWebServerRequest *req) {
   sessionConfirmed = false;
   sessionClaimedMs = millis();
   Serial.println("Session claimed, token=" + sessionToken);
+  lastSeenMs       = millis();
 }
 
 // Use at the start of every handler that CHANGES something on the farm.
@@ -122,10 +129,20 @@ void releaseSession() {
 // Called every second (from Ticker / loop).
 // Drops a claim the page never confirmed, and expires the session after
 // SESSION_TIMEOUT_MS of inactivity.
+// Called every second (from Ticker / loop).
+// - drops a claim the page never confirmed (10 s),
+// - frees the session when the owner page went silent (90 s): the window was
+//   closed without Leave or the phone sleeps (a live page checks in every 15 s),
+// - frees it after SESSION_TIMEOUT_MS without user actions.
 void tickSession() {
   if (sessionFree()) return;
   if (!sessionConfirmed && millis() - sessionClaimedMs >= SESSION_CONFIRM_MS) {
     Serial.println("Session not confirmed by the page - released");
+    releaseSession();
+    return;
+  }
+  if (sessionConfirmed && millis() - lastSeenMs >= SESSION_GONE_MS) {
+    Serial.println("Owner page silent for 90 s - session released");
     releaseSession();
     return;
   }
@@ -240,6 +257,11 @@ static void sendPortal(AsyncWebServerRequest *req) {
   req->send(res);
 }
 
+static void sendFresh(AsyncWebServerRequest *req, const char *path, const char *type) {
+  AsyncWebServerResponse *r = req->beginResponse(SPIFFS, path, type);
+  r->addHeader("Cache-Control", "no-store");
+  req->send(r);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 //  Route setup
 // ─────────────────────────────────────────────────────────────────────────────
@@ -534,6 +556,9 @@ void handleSite() {
       delay(500);
       ESP.restart();
     });
+  server.on("/app.js",    HTTP_GET, [](AsyncWebServerRequest *r) { sendFresh(r, "/app.js",    "application/javascript"); });
+  server.on("/app.css",   HTTP_GET, [](AsyncWebServerRequest *r) { sendFresh(r, "/app.css",   "text/css"); });
+  server.on("/loader.js", HTTP_GET, [](AsyncWebServerRequest *r) { sendFresh(r, "/loader.js", "application/javascript"); });
 
   // "no-cache": the browser keeps the files but re-checks them on every load,
   // so a new upload of the data folder is picked up immediately.

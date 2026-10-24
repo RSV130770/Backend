@@ -152,13 +152,26 @@ public:
       applyTo();
   }
 
+  // Clock time HH:MM on the task's day "afterDays" (as shown in the editor)
+  void computeActivation() override;
+
   void toJson(JsonObject &o) const override;
   bool fromJson(const JsonObject &o) override;
 };
 
+// Clock time HH:MM on the day (task start day + afterDays)
+uint32_t clockTimeOnTaskDay(uint8_t afterDays, uint8_t hour, uint8_t minute);
 
+
+// A pause point: when it is reached the task waits for the user ("frozen"):
+// running processes (daily cycles, custom cycles) go on, only the task's own
+// timing (day counter, delays, offsets of later events) stands still until
+// the user presses Continue. "message" is shown on the dashboard meanwhile.
 class FreezeEvent : public MachineEvent {
 public:
+  String  message;   // text for the user, from the web editor
+  uint8_t seq = 0;   // order among the task's pause points (0, 1, ...)
+
   FreezeEvent() {
     type = EVENT_FREEZE;
     duty = 0;
@@ -169,13 +182,24 @@ public:
     if (TASK_STATUS != T_FROZEN)
       TASK_STATUS = T_FROZEN;
   }
+  // Clock time HH:MM on the task's day "afterDays", like a once event
   void computeActivation() override {
-    activationEpoch =
-      schedulerStartEpoch + afterDays * 86400u + hour * 3600u + minute * 60u;
+    activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);
   }
   void toJson(JsonObject &o) const override;
   bool fromJson(const JsonObject &o) override;
 };
+
+// The pause point the task is waiting at (nullptr when not waiting).
+// Defined in scheduler.cpp.
+extern FreezeEvent* activeFreeze;
+
+// Pause points already confirmed with Continue: RTC memory byte 8, so a
+// reboot does not ask again (bytes 0..7 are PRESET_ID .. FROZEN_DAYS in
+// helpers.h). Defined here only if helpers.h does not define it.
+#ifndef FREEZE_DONE
+#define FREEZE_DONE rtcData[8]
+#endif
 
 // --
 // Factory helper for JSON → MachineEvent*

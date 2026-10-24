@@ -12,6 +12,7 @@
 #define  START_HOUR rtcData[5]
 #define  START_MIN rtcData[6]
 #define  FROZEN_DAYS rtcData[7]
+#define  FREEZE_DONE rtcData[8] 
 
 #define T_STOP 0
 #define T_START 1

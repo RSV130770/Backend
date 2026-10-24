@@ -45,8 +45,6 @@ void MachineEvent::ToNextSwitch() const {
     }
     // Daily / Once → seconds until activation
     out->remaining = activationEpoch - NOW_EPOCH;
-    Serial.print("machine remains:");
-    Serial.println(out->remaining);
 
 }
 
@@ -182,6 +180,12 @@ bool CustomEvent::fromJson(const JsonObject &o) {
 
 void CustomEvent::ToNextSwitch() const {
    if (!out) return;  
+    // Not started yet (start offset): count down to the first switch-on
+    if (NOW_EPOCH < activationEpoch) {
+      out->remaining = activationEpoch - NOW_EPOCH;
+      return;
+    }
+
     uint32_t cycle = onSeconds + offSeconds;
     if (cycle == 0) { out->remaining = 0; return; }
 
@@ -192,8 +196,6 @@ void CustomEvent::ToNextSwitch() const {
         out->remaining = onSeconds - pos;
     else
         out->remaining = cycle - pos;
-      Serial.print("remain:");
-      Serial.println(out->remaining);
 }
 void CustomEvent::computeActivation() {
     activationEpoch =
@@ -201,6 +203,21 @@ void CustomEvent::computeActivation() {
         afterDays * 86400u +
         hour * 3600u +
         minute * 60u;
+}
+
+// Clock time HH:MM on the day (task start day + afterDays). The web editor
+// shows once events and pause points with a clock time, not as an offset.
+uint32_t clockTimeOnTaskDay(uint8_t afterDays, uint8_t hour, uint8_t minute) {
+  time_t day = (time_t)schedulerStartEpoch + (time_t)afterDays * 86400;
+  tm t = *localtime(&day);
+  t.tm_hour = hour;
+  t.tm_min  = minute;
+  t.tm_sec  = 0;
+  return (uint32_t)mktime(&t);
+}
+
+void OnceEvent::computeActivation() {
+  activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);
 }
 
 //---
@@ -227,6 +244,7 @@ void FreezeEvent::toJson(JsonObject &o) const {
   o["afterDays"] = afterDays;
   o["enabled"]   = enabled;
   o["repeat"]    = "freeze";
+  o["message"]   = message;
   // no duty, no rise/fall
 }
 
@@ -241,6 +259,7 @@ bool FreezeEvent::fromJson(const JsonObject &o) {
   enabled   = o["enabled"]   | true;
   duty      = 0;
   channelId = 0;   // doesn't route to any channel
+  message   = (const char *)(o["message"] | "");
   return true;
 }
 

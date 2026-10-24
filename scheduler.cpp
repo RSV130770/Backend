@@ -1,5 +1,6 @@
 #include "scheduler.h"
 #include <Ticker.h>
+#include <algorithm>
 
 Ticker schedulerTicker;
 extern AsyncWebServer server;
@@ -8,6 +9,51 @@ extern uint32_t NOW_EPOCH;
 extern std::vector<MachineEvent*> EVENTS;
 extern tm NOW;
 static MachineEvent* lastApplied[OUTPUT_COUNT] = { nullptr };
+
+// Must be called whenever EVENTS are deleted: lastApplied points into them,
+// and a stale pointer would be read on the next tick (use after free)
+FreezeEvent* activeFreeze = nullptr;
+
+void schedulerForgetEvents() {
+  for (int ch = 0; ch < OUTPUT_COUNT; ch++) lastApplied[ch] = nullptr;
+  activeFreeze = nullptr;
+}
+
+// Number the pause points in time order, so "confirmed up to N" (E)
+// stays valid after the events are rebuilt (reboot, edit)
+static void numberFreezeEvents() {
+  std::vector<FreezeEvent*> fz;
+  for (auto* ev : EVENTS)
+    if (ev->type == EVENT_FREEZE) fz.push_back(static_cast<FreezeEvent*>(ev));
+  std::sort(fz.begin(), fz.end(), [](FreezeEvent* a, FreezeEvent* b) {
+    uint32_t ta = a->afterDays * 1440u + a->hour * 60u + a->minute;
+    uint32_t tb = b->afterDays * 1440u + b->hour * 60u + b->minute;
+    return ta < tb;
+  });
+  for (size_t i = 0; i < fz.size(); i++) fz[i]->seq = (uint8_t)i;
+}
+
+// The first pause point that is reached and not confirmed yet, or nullptr
+static FreezeEvent* findDueFreeze(uint32_t effectiveNow) {
+  FreezeEvent* due = nullptr;
+  for (auto* ev : EVENTS) {
+    if (!ev->enabled || ev->type != EVENT_FREEZE) continue;
+    FreezeEvent* fe = static_cast<FreezeEvent*>(ev);
+    if (fe->seq >= FREEZE_DONE && fe->activationEpoch <= effectiveNow &&
+        (!due || fe->seq < due->seq))
+      due = fe;
+  }
+  return due;
+}
+
+// When an event's place in the task begins: a daily event from its start
+// day on, the others at their activation. While the task waits at a pause
+// point, events that begin after it are held back.
+static uint32_t eventBegins(const MachineEvent* ev) {
+  if (ev->type == EVENT_DAILY)
+    return schedulerStartEpoch + ev->afterDays * 86400u;
+  return ev->activationEpoch;
+}
 // -----------------------------
 // RTC → NOW + NOW_EPOCH
 // -----------------------------
@@ -73,9 +119,15 @@ static void retrospectiveApply() {
   uint32_t      bestFutureTime[OUTPUT_COUNT];
   for (int i = 0; i < OUTPUT_COUNT; i++) bestFutureTime[i] = UINT32_MAX;
 
+  // Events after a reached, unconfirmed pause point stay held back (e.g.
+  // after a reboot while the task waits)
+  FreezeEvent* due = findDueFreeze(effectiveNow);
+  const uint32_t holdAfter = due ? due->activationEpoch : UINT32_MAX;
+
   for (auto* ev : EVENTS) {
     if (!ev->enabled) continue;
     if (ev->type == EVENT_FREEZE) continue;
+    if (eventBegins(ev) > holdAfter) continue;
     if (ev->isExpired()) continue;
 
     uint8_t ch = ev->channelId;
@@ -151,15 +203,24 @@ void schedulerTick() {
   uint32_t      bestFutureTime[OUTPUT_COUNT];
   for (int i = 0; i < OUTPUT_COUNT; i++) bestFutureTime[i] = UINT32_MAX;
 
+  // A pause point reached: wait for the user. Running processes go on;
+  // events that begin after the pause point are held back.
+  FreezeEvent* dueFreeze = findDueFreeze(effectiveNow);
+  if (dueFreeze) {
+    activeFreeze = dueFreeze;
+    if (TASK_STATUS != T_FROZEN) {
+      TASK_STATUS = T_FROZEN;
+      saveTaskData();
+      Serial.printf("Task waits at pause %u: %s\n", dueFreeze->seq, dueFreeze->message.c_str());
+    }
+  }
+  const uint32_t holdAfter =
+    (TASK_STATUS == T_FROZEN && activeFreeze) ? activeFreeze->activationEpoch : UINT32_MAX;
+
   for (auto* ev : EVENTS) {
     if (!ev->enabled) continue;
-
-    // Handle freeze events separately
-    if (ev->type == EVENT_FREEZE) {
-      if (ev->activationEpoch <= effectiveNow)
-        ev->applyAt();
-      continue;
-    }
+    if (ev->type == EVENT_FREEZE) continue;
+    if (eventBegins(ev) > holdAfter) continue;
 
     if (ev->isExpired()) continue;
 
@@ -239,27 +300,53 @@ void schedulerPause() {
 // -----------------------------
 void schedulerResume() {
   if (TASK_STATUS != T_PAUSE && TASK_STATUS != T_FROZEN) return;
+  const bool wasWaiting = (TASK_STATUS == T_FROZEN);   // at a pause point
   // 1) Refresh time
   updateNow();
-  //  1.1) froze handler
-  if (freezeEntryEpoch != 0) {
+  //  1.1) time spent waiting at a pause point / paused by hand
+  if (wasWaiting) {
+    // While waiting the task's day count stood still: move its start forward
+    // by every full day spent waiting, so "day N" events keep their place
+    // after the pause point. Events whose time passed during a shorter wait
+    // run right away. Measured from the pause point itself, so a reboot
+    // while waiting does not shorten the wait.
+    uint32_t from = activeFreeze ? activeFreeze->activationEpoch : freezeEntryEpoch;
+    if (from != 0 && NOW_EPOCH > from) {
+      uint32_t days = (NOW_EPOCH - from) / 86400u;
+      if (days > 0) {
+        schedulerStartEpoch += days * 86400u;
+        time_t st = (time_t)schedulerStartEpoch;
+        tm startTm = *localtime(&st);
+        PutStartTimetoRtc(startTm);
+      }
+      Serial.printf("Waited %lu s: task days moved by %lu\n",
+                    (unsigned long)(NOW_EPOCH - from), (unsigned long)days);
+    }
+  } else if (freezeEntryEpoch != 0) {
     uint32_t elapsed = NOW_EPOCH - freezeEntryEpoch;
     if (elapsed >= 86400u) {
       uint8_t days = (uint8_t)(elapsed / 86400u);
-      FROZEN_DAYS += days;  // accumulates across multiple freezes
-      saveTaskData();
+      FROZEN_DAYS += days;  // accumulates across multiple pauses
     }
-    freezeEntryEpoch = 0;
-    TASK_STATUS = T_START;
   }
+  if (wasWaiting) {
+    // This pause point is confirmed; a reboot must not ask again
+    FREEZE_DONE = activeFreeze ? activeFreeze->seq + 1 : FREEZE_DONE + 1;
+    activeFreeze = nullptr;
+  }
+  freezeEntryEpoch = 0;
+  TASK_STATUS = T_START;
+  saveTaskData();
   // 2) Recompute activationEpoch for all events (in case time changed)
 
   computeAllActivationTimes();
   // 3) Re-apply schedule state as of NOW (overwrites Playground changes)
   retrospectiveApply();
-  // 4) Unfreeze outputs timeline
-  for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
-    OUT[ch].resume(NOW_EPOCH);
+  // 4) Unfreeze outputs timeline (only a manual pause froze them)
+  if (!wasWaiting) {
+    for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
+      OUT[ch].resume(NOW_EPOCH);
+    }
   }
   // 5) Restart periodic tick
   schedulerTicker.detach();
@@ -297,6 +384,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
       MachineEvent* ev = createEventFromJson(e);
       if (ev) EVENTS.push_back(ev);
     }
+    numberFreezeEvents();
     Serial.printf("Built %u events from schedule of preset %s\n",
                   EVENTS.size(), preset["name"] | "unknown");
     return;
@@ -434,6 +522,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
     dayOffset += phaseDays;
   }
 
+  numberFreezeEvents();
   Serial.printf("Built %u events from preset %s\n",
                 EVENTS.size(), preset["name"] | "unknown");
 }

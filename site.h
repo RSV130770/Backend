@@ -66,9 +66,9 @@ public:
   explicit CaptiveRequestHandler(IPAddress ip) : apIP(ip) {}
 
   bool canHandle(AsyncWebServerRequest *request) const override {
-  Serial.printf("REQ host=%s url=%s ua=%s\n",
-  request->host().c_str(), request->url().c_str(),
-  request->hasHeader("User-Agent") ? request->header("User-Agent").c_str() : "-");
+  //Serial.printf("REQ host=%s url=%s ua=%s\n",
+  //request->host().c_str(), request->url().c_str(),
+  //request->hasHeader("User-Agent") ? request->header("User-Agent").c_str() : "-");
     if (isCaptiveProbe(request->url())) return true;
     // Any request for another host name (connectivity checks of any phone
     // vendor, or a page the browser tries to open) goes to the portal.
@@ -82,11 +82,11 @@ public:
 
   void handleRequest(AsyncWebServerRequest *request) override {
     AsyncWebServerResponse *res = request->beginResponse(302, "text/plain", "");
-//    res->addHeader("Location", "http://" + apIP.toString() + "/");
-    res->addHeader("Location", "http://" + apIP.toString() + "/portal");
+    res->addHeader("Location", "http://" + apIP.toString() + "/");
+//    res->addHeader("Location", "http://" + apIP.toString() + "/portal");
     // Phones must not cache the answer to their connectivity check
     res->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    Serial.println("  -> redirected to portal");
+  //  Serial.println("  -> redirected to portal");
     request->send(res);
   }
 
