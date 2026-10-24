@@ -558,10 +558,10 @@ function loadPresetList(attempt) {
     }));
     taskList = tasks;
 
-    // Status + start time ("frozen" is shown like "paused")
-    const status = raw.current?.status || "stopped";
-    taskStatus = (status === "frozen") ? "paused" : status;
+    // Status + start time; "frozen" = waiting at a pause point
+    taskStatus = raw.current?.status || "stopped";
     taskStartTime = raw.current?.startTime || null;
+    pauseMessage = raw.current?.pauseMessage || "";
 
     // The controller's selected preset (running or not, kept in its RTC
     // memory); the template if that preset does not exist
@@ -632,6 +632,10 @@ function runDashboardWorkflow() {
 
 
 function initTaskControlUI() {
+  $("#pause-continue").off().on("click", () => {
+    pauseMessage = "";
+    requestTaskResume();          // the controller confirms the pause point
+  });
   $("#taskStart").off().on("click", requestTaskStart);
   $("#taskPause").off().on("click", requestTaskPause);
   $("#taskStop").off().on("click", requestTaskStop);
@@ -653,9 +657,16 @@ function updateTaskUI(status) {
   else if (status === "paused") {
     $("#taskStatusLabel").text("Paused at: " + taskStartTime);
   }
+  else if (status === "frozen") {
+    $("#taskStatusLabel").text("");   // the banner below shows the message
+  }
   else {
     $("#taskStatusLabel").text(""); // hide when not running/paused
   }
+
+  // Pause point banner
+  $("#pause-banner").toggleClass("d-none", status !== "frozen");
+  $("#pause-message").text(pauseMessage || "");
 
   // Existing logic...
   if (status === "not started" || status === "stopped") {
@@ -671,9 +682,16 @@ function updateTaskUI(status) {
     return;
   }
 
-  if (status === "running" || status === "paused") {
+  if (status === "running" || status === "paused" || status === "frozen") {
 
     $("#taskSelect").addClass("d-none");
+
+    if (status === "frozen") {
+      // Continue is in the banner; Stop still works
+      $("#taskStart").prop("disabled", true);
+      $("#taskPause").prop("disabled", true);
+      $("#taskStop").prop("disabled", false);
+    }
 
     if (status === "running") {
       $("#taskStart").prop("disabled", true);
@@ -787,6 +805,27 @@ function updateNextCountdown(idx, remaining) {
 
 // Fetch full state and fan out to RTC/inputs + outputs
 // force: one request even while the page is hidden (first load)
+// Message of the pause point the task waits at ("" when not waiting)
+let pauseMessage = "";
+
+// /api/state carries the task status: show or hide the pause banner when a
+// pause point is reached (or was confirmed on another screen)
+function followTaskStatus(s) {
+  if (!s || !s.taskStatus) return;
+  const msg = s.pauseMessage || "";
+  if (s.taskStatus === "frozen") {
+    if (taskStatus !== "frozen" || msg !== pauseMessage) {
+      taskStatus = "frozen";
+      pauseMessage = msg;
+      updateTaskUI(taskStatus);
+    }
+  } else if (taskStatus === "frozen" && s.taskStatus === "running") {
+    taskStatus = "running";
+    pauseMessage = "";
+    updateTaskUI(taskStatus);
+  }
+}
+
 function fetchState(force) {
   if (OFFLINE_MODE) {
     // Fake state for debugging
@@ -814,6 +853,7 @@ function fetchState(force) {
     .done(s => {
       renderDashboard(s);
       updateDashboardState(s);
+      followTaskStatus(s);
     })
     .fail(() => {
       console.warn("Failed to fetch /api/state");
@@ -927,7 +967,7 @@ function buildTreeNode(events) {
   if (!events || events.length === 0) return null;
 
   const groupId = events[0].groupId;
-  const repeat = events[0].repeat;
+  const repeat = groupRepeat(events);
   const collapseId = `tree-leaves-${groupId}`;
 
   const { nodeLabel, nodeDays, nodeInfo } = buildNodeSummary(events);
@@ -1034,18 +1074,19 @@ function customOffsetSec(ev) {
 }
 
 function createLeaf(ev, groupId) {
+  const isPause = ev.repeat === 'freeze';
   const cfg = outputsConfig.find(c => c.id == ev.channelId);
-  const label = cfg ? cfg.label : `Ch${ev.channelId}`;
+  const label = isPause ? `⏸ ${ev.message || 'Pause'}` : (cfg ? cfg.label : `Ch${ev.channelId}`);
   const enabled = ev.enabled !== false;
 
   const $leaf = $(`
   <div class="tree-leaf">
     <input type="checkbox" class="tree-check leaf-check" ${enabled ? 'checked' : ''}>
     <span class="tree-leaf-time${ev.repeat === 'custom' ? ' tree-leaf-cycle' : ''}" title="${ev.repeat === 'custom' ? 'on : off' : ''}">${leafTimeText(ev)}</span>
-    <span class="tree-leaf-label">${label}</span>
-    <span class="tree-leaf-duty">${leafDutyText(ev)}</span>
+    <span class="tree-leaf-label">${escapeHtml(label)}</span>
+    <span class="tree-leaf-duty">${isPause ? 'WAIT' : leafDutyText(ev)}</span>
     <div class="tree-actions">
-      <button class="tree-edit-btn" title="Edit">✏</button>
+      <button class="tree-edit-btn${isPause ? ' invisible' : ''}" title="Edit">✏</button>
       <button class="tree-remove-btn" title="Remove">×</button>
     </div>
   </div>
@@ -1103,6 +1144,17 @@ function removeLeaf($leaf, groupId) {
   }
 }
 
+// Repeat type of a group: of its channel events (a pause point is "freeze")
+function groupRepeat(events) {
+  const ev = events.find(e => e.repeat !== 'freeze');
+  return ev ? ev.repeat : 'once';
+}
+
+// The pause point of a group, if it has one
+function groupPause(events) {
+  return events.find(e => e.repeat === 'freeze') || null;
+}
+
 // Text for user input placed into HTML
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
@@ -1120,6 +1172,7 @@ function buildNodeSummary(events) {
   const seenNames = new Set();
 
   const channelList = events
+    .filter(ev => ev.repeat !== 'freeze')
     .filter(ev => {
       if (seenNames.has(ev.channelId)) return false;
       seenNames.add(ev.channelId);
@@ -1130,17 +1183,21 @@ function buildNodeSummary(events) {
       return cfg ? cfg.label : `Ch${ev.channelId}`;
     }).join(', ');
 
-  // The user's name for the group if there is one, otherwise the channels
-  const nodeLabel = groupNameOf(events) || channelList;
+  // The user's name for the group if there is one, otherwise the channels;
+  // a group that pauses the task is marked
+  const pause = groupPause(events);
+  const nodeLabel = (pause ? '⏸ ' : '') +
+    (groupNameOf(events) || channelList || (pause ? (pause.message || 'Pause') : ''));
 
-  const repeat = events[0].repeat;
-  const afterDays = events[0].afterDays || 0;
-  const expireAfterDays = events[0].expireAfterDays || 0;
+  const first = events.find(e => e.repeat !== 'freeze') || events[0];
+  const repeat = groupRepeat(events);
+  const afterDays = first.afterDays || 0;
+  const expireAfterDays = first.expireAfterDays || 0;
 
-  let nodeTime = events[0].time || '--:--';
+  let nodeTime = first.time || '--:--';
   if (repeat === 'daily') {
     const offEv =
-      events.find(ev => ev.channelId == events[0].channelId && ev.time !== nodeTime) ||
+      events.find(ev => ev.channelId == first.channelId && ev.time !== nodeTime) ||
       events.find(ev => ev.time !== nodeTime);
     if (offEv) nodeTime = `${nodeTime}→${offEv.time}`;
   }
@@ -1151,8 +1208,10 @@ function buildNodeSummary(events) {
   const nodeDays = days.join(' : ');
 
   // Everything else goes into the tooltip; the leaves show the details
-  const when = (repeat === 'custom') ? `${leafTimeText(events[0])} cycle` : nodeTime;
-  const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}`;
+  const when = (repeat === 'custom') ? `${leafTimeText(first)} cycle` : nodeTime;
+  const pauseEv = groupPause(events);
+  const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}` +
+    (pauseEv ? ` · pause: ${pauseEv.message || ''}` : '');
   return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList };
 }
 
@@ -1458,8 +1517,19 @@ function openBatchModal($row, newGroupId) {
   currentBatchGroupId = newGroupId || ($row ? $row.data('groupId') : generateGroupId());
 
   const isNew = !$row;
-  const existingEvents = isNew ? [] : getNodeEvents($row);
-  $('#batch-name').val(groupNameOf(existingEvents));
+  const allEvents = isNew ? [] : getNodeEvents($row);
+  $('#batch-name').val(groupNameOf(allEvents));
+  // Pause point of the group (once groups only)
+  const pauseEv = groupPause(allEvents);
+  $('#batch-pause').prop('checked', !!pauseEv);
+  $('#batch-message').val(pauseEv ? (pauseEv.message || '') : '').toggle(!!pauseEv);
+  $('#batch-pause').off('change').on('change', function () {
+    $('#batch-message').toggle(this.checked);
+    if (this.checked) $('#batch-message').trigger('focus');
+  });
+  // Channel events (without the pause point) drive the rest of the dialog
+  const existingEvents = allEvents.filter(ev => ev.repeat !== 'freeze');
+  if (existingEvents.length === 0 && pauseEv) existingEvents.push(Object.assign({}, pauseEv, { repeat: 'once' }));
   const afterDays = existingEvents.length > 0 ? (existingEvents[0].afterDays || 0) : 0;
   const expireAfterDays = existingEvents.length > 0 ? (existingEvents[0].expireAfterDays || 0) : 0;
   $('#batch-after-days').val(afterDays);
@@ -1498,7 +1568,7 @@ function openBatchModal($row, newGroupId) {
   updateBatchTimeFields(repeat);
 
   // Build channel list: the group's channels start in "In this group"
-  batchMembers = new Set(existingEvents.map(ev => Number(ev.channelId)));
+  batchMembers = new Set(allEvents.filter(ev => ev.repeat !== 'freeze').map(ev => Number(ev.channelId)));
   buildBatchChannelList(existingEvents, repeat);
 
   // Bind repeat change
@@ -1536,6 +1606,8 @@ function updateBatchTimeFields(repeat) {
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').hide();
   }
+  // Only a once group can pause the task
+  $('#batch-pause-group').toggle(repeat === 'once');
 }
 
 // Channels of the group being edited (ids). Set when the dialog opens and
@@ -1740,8 +1812,12 @@ function saveBatchItem() {
   $off.toggleClass('is-invalid', offMissing);
   if (onMissing || offMissing) return;
 
-  // A group needs at least one channel
-  if (batchMembers.size === 0) {
+  // A pause point (once groups only) with its message
+  const withPause = (repeat === 'once') && $('#batch-pause').is(':checked');
+  const pauseMessage = $('#batch-message').val().trim();
+
+  // A group needs at least one channel, or a pause point
+  if (batchMembers.size === 0 && !withPause) {
     $('#batch-channel-error').show();
     return;
   }
@@ -1802,6 +1878,22 @@ function saveBatchItem() {
       events.push({ ...base, time: timeOn, duty, on: 0, off: 0 });
     }
   });
+
+  // The pause point: a "freeze" event at the group's time (after its channels)
+  if (withPause) {
+    events.push({
+      groupId: currentBatchGroupId,
+      groupName: $('#batch-name').val().trim(),
+      channelId: 0,                 // ignored by the controller
+      time: timeOn,
+      afterDays: parseInt($('#batch-after-days').val()) || 0,
+      expireAfterDays: 0,
+      repeat: 'freeze',
+      message: pauseMessage,
+      duty: 0, rise: 0, fall: 0, on: 0, off: 0,
+      enabled: true
+    });
+  }
 
   $('#batchModal').modal('hide');
 
@@ -2844,6 +2936,31 @@ window.addEventListener('pagehide', () => {
   if (exitGuardLeaving || OFFLINE_MODE || !navigator.sendBeacon) return;
   navigator.sendBeacon('/api/release');
 });
+
+// Pull-to-refresh: some browsers (e.g. Mi Browser) ignore the CSS rule
+// "overscroll-behavior: none" and reload the page when it is pulled down at
+// the top. Cancel exactly that gesture: a mostly downward drag while the page
+// (and any scroll box under the finger) is already at its top.
+let ptrStartX = 0, ptrStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return;
+  ptrStartX = e.touches[0].clientX;
+  ptrStartY = e.touches[0].clientY;
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (e.touches.length !== 1 || !e.cancelable) return;
+  const dx = e.touches[0].clientX - ptrStartX;
+  const dy = e.touches[0].clientY - ptrStartY;
+  if (dy <= 0 || Math.abs(dx) > Math.abs(dy)) return;   // up, or sideways swipe
+  if (e.target.closest && e.target.closest('input, textarea, select')) return;
+  // A scroll box under the finger that can still scroll up handles the drag
+  for (let el = e.target; el && el !== document.body && el.nodeType === 1; el = el.parentElement) {
+    if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight) return;
+  }
+  const page = document.scrollingElement || document.documentElement;
+  if (page.scrollTop <= 0) e.preventDefault();
+}, { passive: false });
 
 // Reload, closing the tab or typing another address
 window.addEventListener('beforeunload', e => {
