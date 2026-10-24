@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <title>Ecoslider Premifarm</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Not zoomable: otherwise Android's embedded browser (captive window)
+       shows its +/- zoom buttons over the page's Save/Cancel buttons -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <link rel="stylesheet" href="/bootstrap.min.css">
   <link rel="stylesheet" href="/app.css">
 </head>
@@ -334,6 +336,14 @@
 
       <div class="modal-body">
 
+        <!-- GROUP NAME (shown in the schedule list instead of channel names) -->
+        <div class="form-group">
+          <label for="batch-name">Name</label>
+          <input type="text" class="form-control" id="batch-name" maxlength="24"
+                 placeholder="e.g. Lights (empty: channel names)"
+                 autocomplete="off" autocapitalize="sentences" spellcheck="false">
+        </div>
+
         <!-- REPEAT TYPE -->
         <div class="form-group">
           <label for="batch-repeat">Repeat</label>
@@ -505,6 +515,17 @@
           </div>
         </div>
 
+        <!-- Custom cycle only: start offset after the task starts -->
+        <div class="form-group" id="edit-offset-group" style="display:none;">
+          <label for="edit-offset-h">Start offset after the task starts</label>
+          <div class="d-flex flex-nowrap align-items-center">
+            <input type="number" class="form-control" id="edit-offset-h" min="0" max="23" inputmode="numeric" style="max-width:90px;">
+            <span class="mx-2">h</span>
+            <input type="number" class="form-control" id="edit-offset-m" min="0" max="59" inputmode="numeric" style="max-width:90px;">
+            <span class="mx-2">min</span>
+          </div>
+        </div>
+
         <!-- REPEAT -->
         <div class="form-group">
           <label for="edit-repeat">Repeat</label>
@@ -590,6 +611,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button class="btn btn-outline-primary" id="save-as-new">Save as new</button>
         <button class="btn btn-primary" id="save-as-confirm">Save</button>
       </div>
     </div>

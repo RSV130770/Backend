@@ -147,7 +147,12 @@ padding-left:10px;
 }
 
 html, body {
+  /* Hide the off-screen pages (the 400vw strip) without making body its own
+     scroll box: with "hidden" on both html and body some phone browsers
+     (e.g. Mi Browser) stop scrolling the page vertically. "clip" does not
+     create a scroll box; "hidden" stays as the fallback for old browsers. */
   overflow-x: hidden !important;
+  overflow-x: clip !important;
   width: 100%;
   max-width: 100%;
   margin: 0;
@@ -222,6 +227,80 @@ table {
     line-height: 1.2;
   }
 /* -------------------------scedule CSS-------------------------*/
+
+/* Batch modal: channel tiles, "In this group" / "Available" */
+.ch-zone {
+  border: 2px dashed #ced4da;
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 10px;
+  min-height: 72px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.ch-zone-in {
+  border-color: #80bdff;
+  background: #f3f8ff;
+}
+.ch-zone-hover {
+  border-color: #007bff;
+  background: #e2efff;
+}
+.ch-zone-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.ch-zone-empty {
+  font-size: 0.85rem;
+  color: #6c757d;
+  padding: 6px 2px;
+}
+.ch-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ch-tile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid #dee2e6;
+  border-radius: 20px;
+  background: #fff;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;          /* dragging a tile must not scroll the dialog */
+  font-size: 0.85rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.ch-tile .pic {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+.ch-tile .pic img {
+  width: 18px;
+  height: 18px;
+}
+.ch-tile-dragging {
+  opacity: 0.35;
+}
+.ch-tile-ghost {
+  position: fixed;
+  z-index: 5000;
+  pointer-events: none;
+  opacity: 0.9;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
 
 /* Batch modal channel rows */
 .batch-channel-row {
@@ -361,36 +440,20 @@ table {
   transform: scale(1.1);
 }
 
+/* Playground start/stop: Bootstrap btn-success / btn-danger + .btn-small,
+   the same buttons as on the Dashboard */
 .play-btn {
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: 6px;
-  background: #444;
-  color: white;
+  margin-left: 0.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: 0.15s ease;
-  margin-left: 6px;
 }
 
-.play-btn:hover {
-  filter: brightness(1.2);
-}
-
-.play-btn.play-on {
-  background: #2e7d32; /* green */
-}
-
-.play-btn.play-off {
-  background: #b71c1c; /* red */
-}
-
+/* the button whose state is applied right now looks pressed */
 .play-btn.play-active {
-  box-shadow: 0 0 10px rgba(255,255,255,0.7);
-  filter: brightness(1.35);
+  box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.22);
+  transform: translateY(1px);
+  filter: brightness(0.92);
 }
 
 
@@ -459,9 +522,25 @@ table {
   white-space: nowrap;
 }
 
-.tree-node-time,
 .tree-leaf-time {
   font-family: monospace;
+  font-weight: 600;
+}
+
+/* group line: delay : duration as a small grey tag before the name */
+.tree-node-days {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e9ecef;
+  color: #495057;
+  font-family: monospace;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.tree-node-channels {
   font-weight: 600;
 }
 
@@ -482,6 +561,13 @@ table {
   flex: 0 0 52px;
   font-weight: 400;
   color: #666;
+}
+
+/* custom cycle "10s:1h" can be wider than a clock time */
+.tree-leaf-time.tree-leaf-cycle {
+  flex: 0 0 auto;
+  min-width: 52px;
+  margin-right: 6px;
 }
 
 .tree-leaf-label {
@@ -528,7 +614,7 @@ html, body {
 
 /* Horizontal swipes belong to the app's own page navigation */
 #container {
-  touch-action: pan-y pinch-zoom;
+  touch-action: pan-y;   /* no pinch zoom: see the viewport tag */
 }
 
 #exitModal {

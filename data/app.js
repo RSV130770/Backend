@@ -96,8 +96,18 @@ function forceSyncTime() {
 }
 
 
+// Polling the controller is pointless while the page is hidden (screen off,
+// app or captive-portal window in the background) and after the user has
+// left or lost the session. Without this a forgotten page keeps the ESP32
+// busy with a request every second.
+function pollingAllowed() {
+  if (document.hidden) return false;
+  if (typeof exitGuardLeaving !== 'undefined' && exitGuardLeaving) return false;
+  return true;
+}
+
 function syncTime() {
-  if (OFFLINE_MODE) return;
+  if (OFFLINE_MODE || !pollingAllowed()) return;
 
   $.getJSON("/api/state", s => {
     if (!s.rtc) return;
@@ -302,7 +312,10 @@ function enableSwipe() { swipeEnabled = true; }
    PAGE SWITCHING
    ============================================================ */
 function showPage(name) {
-    if ($('.modal.show').length > 0) return;
+  // After Leave / "Session ended" the page is dead: no screen may restart
+  // its polling
+  if (typeof exitGuardLeaving !== 'undefined' && exitGuardLeaving) return;
+  if ($('.modal.show').length > 0) return;
   const index = pageOrder.indexOf(name);
   if (index === -1) return;
 
@@ -473,20 +486,21 @@ function loadTaskContent(index) {
 //  loadTaskContent(taskIndex);
 //});
 
+// Picking a schedule in the box makes it the selected one on the controller
+// (kept in its RTC memory), so it is shown again after a reboot.
+// The box is hidden while a schedule runs, so nothing is running here.
 $("#taskSelect").on("change", () => {
-  const newIndex = Number($("#taskSelect").val());
-  if (taskStatus === "running" || taskStatus === "paused") {
-    $("#taskStatusLabel").text("Stopping current task...");
-    requestTaskStop(() => {
-      taskIndex = newIndex;
-      loadTaskContent(taskIndex);
-      updateScheduleHeader();  
-    });
-  } else {
-    taskIndex = newIndex;
-    loadTaskContent(taskIndex);
-    updateScheduleHeader();
-  }
+  taskIndex = Number($("#taskSelect").val());
+  loadTaskContent(taskIndex);
+  updateScheduleHeader();
+  updateTaskUI(taskStatus);
+  if (OFFLINE_MODE) return;
+  $.ajax({
+    url: "/preset/select",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ id: taskIndex })
+  }).fail(xhr => console.warn("/preset/select failed:", xhr.status, xhr.responseText));
 });
 
 function initDashboard() {
@@ -515,9 +529,25 @@ function initDashboard() {
   // Output rows depend only on the channel configuration, so build them
   // right away: a failing or slow task list must not leave Outputs empty.
   buildDashboard();
-  fetchState();
+  // Ask for the task list only after the first state answer: right after
+  // connecting the controller is busy serving all files at once, and the
+  // list is the request that needs the most memory
+  // (forced: a captive-portal window often loads in the background, hidden)
+  $.when(fetchState(true)).always(() => loadPresetList(1));
+  console.log("Dashboard init");
+}
 
-  $.getJSON("/preset/list", raw => {
+// The controller can be busy right after a reboot (Wi-Fi start, phone
+// loading all files at once), so a failed list request is retried a few
+// times before giving up.
+const PRESET_LIST_TRIES = 4;
+let presetListLoading = false;
+
+function loadPresetList(attempt) {
+  presetListLoading = true;
+  $("#taskSelectLabel").text(attempt > 1 ? `Loading task list (try ${attempt})...` : "Loading task list...");
+  $.ajax({ url: "/preset/list", dataType: "json", timeout: 8000 }).done(raw => {
+    presetListLoading = false;
 
     // Normalize backend presets → frontend task list.
     // Preset 0 is the built-in template ("Default").
@@ -533,17 +563,17 @@ function initDashboard() {
     taskStatus = (status === "frozen") ? "paused" : status;
     taskStartTime = raw.current?.startTime || null;
 
-    // The running preset; otherwise the first user preset; the template
-    // only when the user has no presets of his own
-    const running = (taskStatus === "running" || taskStatus === "paused");
-    taskIndex = running ? raw.current.presetId : defaultTaskIndex();
+    // The controller's selected preset (running or not, kept in its RTC
+    // memory); the template if that preset does not exist
+    const selected = raw.current ? raw.current.presetId : 0;
+    taskIndex = tasks.some(t => t.index === selected) ? selected : 0;
 
       
     // Populate dropdown
     const select = $("#taskSelect");
     select.empty();
     tasks.forEach(t => {
-      select.append(`<option value="${t.index}">${t.name}</option>`);
+      select.append($('<option>').val(t.index).text(t.name));   // name as plain text
     });
     select.val(taskIndex);
 
@@ -553,18 +583,30 @@ function initDashboard() {
     loadTaskContent(taskIndex);
     initTaskControlUI();
   })
-  .fail(xhr => {
-    console.warn("Failed to load /preset/list:", xhr.status);
-    $("#taskSelectLabel").text("Task list unavailable");
+  .fail((xhr, textStatus) => {
+    console.warn("Failed to load /preset/list:", xhr.status, textStatus);
+    // Retry even while the page is hidden: a captive-portal window loads in
+    // the background and must have its list when the user brings it up
+    const left = typeof exitGuardLeaving !== 'undefined' && exitGuardLeaving;
+    if (attempt < PRESET_LIST_TRIES && !left) {
+      setTimeout(() => loadPresetList(attempt + 1), 1500 * attempt);
+      return;
+    }
+    presetListLoading = false;
+    // Show why, and let the user try again with a tap
+    const why = xhr.status ? `error ${xhr.status}` : textStatus;
+    $("#taskSelectLabel")
+      .html(`Task list unavailable (${why}). <a href="#" id="taskListRetry">Retry</a>`);
+    $("#taskListRetry").one("click", e => { e.preventDefault(); loadPresetList(1); });
   });
-  console.log("Dashboard init");
 }
 
-// First user preset, or the template (0) when there is none
-function defaultTaskIndex() {
-  const own = taskList.find(t => t.index !== 0);
-  return own ? own.index : 0;
-}
+// The page was hidden while loading and the list never arrived: try again as
+// soon as the user brings the window to the front
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || OFFLINE_MODE) return;
+  if (taskList.length === 0 && !presetListLoading) loadPresetList(1);
+});
 
 let dashboardTimer = null;
 
@@ -744,7 +786,8 @@ function updateNextCountdown(idx, remaining) {
 
 
 // Fetch full state and fan out to RTC/inputs + outputs
-function fetchState() {
+// force: one request even while the page is hidden (first load)
+function fetchState(force) {
   if (OFFLINE_MODE) {
     // Fake state for debugging
     const fake = {
@@ -766,7 +809,8 @@ function fetchState() {
   }
 
   // Online mode
-  $.getJSON("/api/state")
+  if (!force && !pollingAllowed()) return;
+  return $.getJSON("/api/state")
     .done(s => {
       renderDashboard(s);
       updateDashboardState(s);
@@ -886,7 +930,7 @@ function buildTreeNode(events) {
   const repeat = events[0].repeat;
   const collapseId = `tree-leaves-${groupId}`;
 
-  const { nodeLabel, nodeTime } = buildNodeSummary(events);
+  const { nodeLabel, nodeDays, nodeInfo } = buildNodeSummary(events);
   const allEnabled = events.every(ev => ev.enabled !== false);
 
   const $node = $(`
@@ -895,12 +939,9 @@ function buildTreeNode(events) {
       <span class="tree-toggle">▶</span>
       <input type="checkbox" class="tree-check node-check"
              ${allEnabled ? 'checked' : ''}>
-      <div class="tree-node-label">
-        <span class="tree-node-time">${nodeTime}</span>
-        <span class="text-muted mx-1">·</span>
-        <span class="tree-node-channels">${nodeLabel}</span>
-        <span class="text-muted mx-1">·</span>
-        <span class="tree-node-repeat">${formatRepeat(repeat)}</span>
+      <div class="tree-node-label" title="${escapeHtml(nodeInfo)}">
+        <span class="tree-node-days${nodeDays ? '' : ' d-none'}">${nodeDays}</span>
+        <span class="tree-node-channels">${escapeHtml(nodeLabel)}</span>
       </div>
       <div class="tree-actions">
         <button class="tree-edit-btn" title="Edit">✏</button>
@@ -964,6 +1005,34 @@ function leafDutyText(ev) {
   return duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
 }
 
+// Short duration: 10s, 5m, 1h, 1h30m, 1m30s
+function shortDuration(sec) {
+  sec = parseInt(sec) || 0;
+  if (sec === 0) return '0s';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return (h ? `${h}h` : '') + (m ? `${m}m` : '') + (s ? `${s}s` : '');
+}
+
+// Time column of a leaf: clock time, or "on:off" for a custom cycle, which
+// starts with the preset and so has no meaningful clock time
+function leafTimeText(ev) {
+  if (ev.repeat === 'custom') {
+    const offset = customOffsetSec(ev);
+    return `${shortDuration(ev.on)}:${shortDuration(ev.off)}` +
+           (offset > 0 ? ` +${shortDuration(offset)}` : '');
+  }
+  return ev.time || '--:--';
+}
+
+// A custom event starts its on/off cycle this long after the task starts.
+// Stored in the event's "time" as HH:MM: the firmware adds it to the start
+// (CustomEvent::computeActivation). "--:--" or empty means no offset.
+function customOffsetSec(ev) {
+  const t = ev.time;
+  if (!t || t === '--:--') return 0;
+  return timeToSeconds(t);
+}
+
 function createLeaf(ev, groupId) {
   const cfg = outputsConfig.find(c => c.id == ev.channelId);
   const label = cfg ? cfg.label : `Ch${ev.channelId}`;
@@ -972,7 +1041,7 @@ function createLeaf(ev, groupId) {
   const $leaf = $(`
   <div class="tree-leaf">
     <input type="checkbox" class="tree-check leaf-check" ${enabled ? 'checked' : ''}>
-    <span class="tree-leaf-time">${ev.time || '--:--'}</span>
+    <span class="tree-leaf-time${ev.repeat === 'custom' ? ' tree-leaf-cycle' : ''}" title="${ev.repeat === 'custom' ? 'on : off' : ''}">${leafTimeText(ev)}</span>
     <span class="tree-leaf-label">${label}</span>
     <span class="tree-leaf-duty">${leafDutyText(ev)}</span>
     <div class="tree-actions">
@@ -1034,10 +1103,23 @@ function removeLeaf($leaf, groupId) {
   }
 }
 
+// Text for user input placed into HTML
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// Group name entered by the user (stored as "groupName" in each event of the
+// group); empty when the group has none
+function groupNameOf(events) {
+  const ev = events.find(e => e.groupName && String(e.groupName).trim());
+  return ev ? String(ev.groupName).trim() : '';
+}
+
 function buildNodeSummary(events) {
   const seenNames = new Set();
 
-  const nodeLabel = events
+  const channelList = events
     .filter(ev => {
       if (seenNames.has(ev.channelId)) return false;
       seenNames.add(ev.channelId);
@@ -1047,6 +1129,9 @@ function buildNodeSummary(events) {
       const cfg = outputsConfig.find(c => c.id == ev.channelId);
       return cfg ? cfg.label : `Ch${ev.channelId}`;
     }).join(', ');
+
+  // The user's name for the group if there is one, otherwise the channels
+  const nodeLabel = groupNameOf(events) || channelList;
 
   const repeat = events[0].repeat;
   const afterDays = events[0].afterDays || 0;
@@ -1059,9 +1144,16 @@ function buildNodeSummary(events) {
       events.find(ev => ev.time !== nodeTime);
     if (offEv) nodeTime = `${nodeTime}→${offEv.time}`;
   }
-  if (afterDays > 0) nodeTime += ` +${afterDays}d`;
-  if (expireAfterDays > 0) nodeTime += ` /${expireAfterDays}d`;
-  return { nodeLabel, nodeTime };
+  // Shown in the group line: delay "+2d" and duration "10d", only if set
+  const days = [];
+  if (afterDays > 0) days.push(`+${afterDays}d`);
+  if (expireAfterDays > 0) days.push(`${expireAfterDays}d`);
+  const nodeDays = days.join(' : ');
+
+  // Everything else goes into the tooltip; the leaves show the details
+  const when = (repeat === 'custom') ? `${leafTimeText(events[0])} cycle` : nodeTime;
+  const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}`;
+  return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList };
 }
 
 function refreshNodeSummary($node) {
@@ -1072,9 +1164,10 @@ function refreshNodeSummary($node) {
   });
   if (events.length === 0) return;
 
-  const { nodeLabel, nodeTime } = buildNodeSummary(events);
-  $node.find('.tree-node-time').text(nodeTime);
+  const { nodeLabel, nodeDays, nodeInfo } = buildNodeSummary(events);
+  $node.find('.tree-node-days').text(nodeDays).toggleClass('d-none', !nodeDays);
   $node.find('.tree-node-channels').text(nodeLabel);
+  $node.find('.tree-node-label').attr('title', nodeInfo);
 }
 
 function generateGroupId() {
@@ -1366,6 +1459,7 @@ function openBatchModal($row, newGroupId) {
 
   const isNew = !$row;
   const existingEvents = isNew ? [] : getNodeEvents($row);
+  $('#batch-name').val(groupNameOf(existingEvents));
   const afterDays = existingEvents.length > 0 ? (existingEvents[0].afterDays || 0) : 0;
   const expireAfterDays = existingEvents.length > 0 ? (existingEvents[0].expireAfterDays || 0) : 0;
   $('#batch-after-days').val(afterDays);
@@ -1403,7 +1497,8 @@ function openBatchModal($row, newGroupId) {
   $('#batch-time-on, #batch-time-off').removeClass('is-invalid');
   updateBatchTimeFields(repeat);
 
-  // Build channel list
+  // Build channel list: the group's channels start in "In this group"
+  batchMembers = new Set(existingEvents.map(ev => Number(ev.channelId)));
   buildBatchChannelList(existingEvents, repeat);
 
   // Bind repeat change
@@ -1443,9 +1538,31 @@ function updateBatchTimeFields(repeat) {
   }
 }
 
+// Channels of the group being edited (ids). Set when the dialog opens and
+// kept when the repeat type changes; tiles move channels in and out.
+let batchMembers = new Set();
+
 function buildBatchChannelList(existingEvents, repeat) {
   const $list = $('#batch-channel-list');
   $list.empty();
+
+  // Two areas of channel tiles, then the settings of the chosen channels
+  $list.append(`
+    <div class="ch-zone ch-zone-in" data-zone="in">
+      <div class="ch-zone-title">In this group</div>
+      <div class="ch-tiles"></div>
+      <div class="ch-zone-empty">Drag channels here or tap them</div>
+    </div>
+    <div class="ch-zone ch-zone-out" data-zone="out">
+      <div class="ch-zone-title">Available</div>
+      <div class="ch-tiles"></div>
+    </div>
+    <div id="batch-channel-error" class="text-danger small mb-2" style="display:none;">
+      Add at least one channel to the group.
+    </div>
+    <div class="ch-settings"></div>`);
+
+  const $settings = $list.find('.ch-settings');
 
   outputsConfig.forEach(cfg => {
     // Find existing event for this channel
@@ -1478,9 +1595,9 @@ function buildBatchChannelList(existingEvents, repeat) {
                value="${duty}" min="0" max="100" style="width:80px;">`;
     }
 
-    $list.append(`
-      <div class="batch-channel-row">
-        <div class="batch-channel-label">${cfg.label}</div>
+    $settings.append(`
+      <div class="batch-channel-row" data-channel="${cfg.id}">
+        <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
         <div class="batch-channel-duty">${dutyInput}</div>
       </div>
     `);
@@ -1489,6 +1606,123 @@ function buildBatchChannelList(existingEvents, repeat) {
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
     $(this).next('label').text(this.checked ? 'On' : 'Off');
+  });
+
+  renderChannelTiles();
+  bindChannelTileDrag($list);
+}
+
+// Put every channel tile into its area (in output order) and show the
+// settings rows of the channels in the group only
+function renderChannelTiles() {
+  const $list = $('#batch-channel-list');
+  const $in = $list.find('.ch-zone-in .ch-tiles').empty();
+  const $out = $list.find('.ch-zone-out .ch-tiles').empty();
+
+  outputsConfig.forEach(cfg => {
+    const invert = cfg.invert ? 'filter: invert(100%);' : '';
+    const $tile = $(`
+      <div class="ch-tile" data-channel="${cfg.id}" role="button" tabindex="0">
+        <div class="pic" style="${cfg.style || ''}">
+          <img src="${cfg.icon || '/sun.svg'}" style="${invert}" width="24" height="24" alt="">
+        </div>
+        <span class="ch-tile-label">${escapeHtml(cfg.label)}</span>
+      </div>`);
+    (batchMembers.has(Number(cfg.id)) ? $in : $out).append($tile);
+    $list.find(`.batch-channel-row[data-channel="${cfg.id}"]`)
+      .toggle(batchMembers.has(Number(cfg.id)));
+  });
+
+  $list.find('.ch-zone-in .ch-zone-empty').toggle(batchMembers.size === 0);
+  if (batchMembers.size > 0) $('#batch-channel-error').hide();
+}
+
+// Move a channel into or out of the group
+function setChannelMember(id, inGroup) {
+  id = Number(id);
+  if (inGroup === batchMembers.has(id)) return;
+  if (inGroup) {
+    batchMembers.add(id);
+    // A channel just added starts switched on, not at 0 %
+    const $num = $(`.batch-duty-input[data-channel="${id}"]`);
+    if ($num.length && !(parseInt($num.val()) > 0)) $num.val(100);
+    const $tog = $(`#batch-toggle-${id}`);
+    if ($tog.length && !$tog.is(':checked')) $tog.prop('checked', true).trigger('change');
+  } else {
+    batchMembers.delete(id);
+  }
+  renderChannelTiles();
+}
+
+// Tiles: tap moves a tile to the other area; drag drops it on an area.
+// Pointer events cover touch and mouse; a tile does not scroll the dialog
+// (touch-action: none in the CSS), the areas around it do.
+function bindChannelTileDrag($list) {
+  let drag = null;   // { id, startX, startY, ghost, moved }
+
+  const zoneAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const $zone = el ? $(el).closest('.ch-zone') : $();
+    return $zone.length ? $zone.data('zone') : null;
+  };
+
+  $list.off('.chdrag');
+  $list.on('pointerdown.chdrag', '.ch-tile', function (e) {
+    if (e.button !== undefined && e.button > 0) return;
+    drag = { id: $(this).data('channel'), startX: e.clientX, startY: e.clientY,
+             ghost: null, tile: this, moved: false };
+    try { this.setPointerCapture(e.pointerId); } catch (err) { /* old browsers */ }
+  });
+
+  $list.on('pointermove.chdrag', '.ch-tile', function (e) {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) < 8) return;   // still a tap
+    if (!drag.moved) {
+      drag.moved = true;
+      const r = drag.tile.getBoundingClientRect();
+      drag.ghost = $(drag.tile).clone().addClass('ch-tile-ghost')
+        .css({ width: r.width, left: r.left, top: r.top }).appendTo('body');
+      drag.offX = drag.startX - r.left;
+      drag.offY = drag.startY - r.top;
+      $(drag.tile).addClass('ch-tile-dragging');
+    }
+    drag.ghost.css({ left: e.clientX - drag.offX, top: e.clientY - drag.offY });
+    const zone = zoneAt(e.clientX, e.clientY);
+    $list.find('.ch-zone').each(function () {
+      $(this).toggleClass('ch-zone-hover', $(this).data('zone') === zone);
+    });
+  });
+
+  const finish = e => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    $list.find('.ch-zone').removeClass('ch-zone-hover');
+    $(d.tile).removeClass('ch-tile-dragging');
+    if (d.ghost) d.ghost.remove();
+    if (!d.moved) {
+      setChannelMember(d.id, !batchMembers.has(Number(d.id)));   // tap
+      return;
+    }
+    const zone = e && e.type === 'pointerup' ? zoneAt(e.clientX, e.clientY) : null;
+    if (zone === 'in') setChannelMember(d.id, true);
+    if (zone === 'out') setChannelMember(d.id, false);
+  };
+  $list.on('pointerup.chdrag', '.ch-tile', finish);
+  $list.on('pointercancel.chdrag', '.ch-tile', () => {
+    if (drag && drag.ghost) drag.ghost.remove();
+    if (drag) $(drag.tile).removeClass('ch-tile-dragging');
+    $list.find('.ch-zone').removeClass('ch-zone-hover');
+    drag = null;
+  });
+
+  // Keyboard: Enter / Space toggles like a tap
+  $list.on('keydown.chdrag', '.ch-tile', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setChannelMember($(this).data('channel'), !batchMembers.has(Number($(this).data('channel'))));
+    }
   });
 }
 
@@ -1505,6 +1739,12 @@ function saveBatchItem() {
   $on.toggleClass('is-invalid', onMissing);
   $off.toggleClass('is-invalid', offMissing);
   if (onMissing || offMissing) return;
+
+  // A group needs at least one channel
+  if (batchMembers.size === 0) {
+    $('#batch-channel-error').show();
+    return;
+  }
 
   // Time fields — meaning depends on repeat type
   const timeOn = $on.val();
@@ -1526,11 +1766,11 @@ function saveBatchItem() {
       ? ($(`#batch-toggle-${cfg.id}`).is(':checked') ? 100 : 0)
       : (parseInt($(`.batch-duty-input[data-channel="${cfg.id}"]`).val()) || 0);
 
-    // A channel left at 0 that was not in the group before is not part of it.
-    // Without this, every batch adds 0-duty events for ALL outputs and e.g. a
-    // light group would switch the pump off at its start time.
+    // Only channels placed in "In this group" belong to the group. Without
+    // this, every batch would add events for ALL outputs and e.g. a light
+    // group would switch the pump off at its start time.
     const prev = existingEvents.find(ev => ev.channelId == cfg.id);
-    if (duty <= 0 && !prev) return;
+    if (!batchMembers.has(Number(cfg.id))) return;
 
     const base = {
       groupId: currentBatchGroupId,
@@ -1538,6 +1778,7 @@ function saveBatchItem() {
       afterDays: parseInt($('#batch-after-days').val()) || 0,
       expireAfterDays: parseInt($('#batch-expire').val()) || 0,
       repeat: repeat,
+      groupName: $('#batch-name').val().trim(),
       // keep ramps already set for this channel (e.g. 2 min from the template)
       rise: prev ? (prev.rise || 0) : (cfg.riseDefault || 0),
       fall: prev ? (prev.fall || 0) : (cfg.fallDefault || 0),
@@ -1610,6 +1851,16 @@ function openLeafModal($leaf, groupId) {
   $('#edit-channel').closest('.form-group').hide();
   $('#edit-time').closest('.form-group').hide();
   $('#after-days-group').hide();
+
+  // Custom cycle: its own start offset, so channels of one group need not
+  // all switch on at the same moment
+  const isCustom = (ev.repeat === 'custom');
+  $('#edit-offset-group').toggle(isCustom);
+  if (isCustom) {
+    const off = customOffsetSec(ev);
+    $('#edit-offset-h').val(Math.floor(off / 3600));
+    $('#edit-offset-m').val(Math.floor((off % 3600) / 60));
+  }
   $('#edit-repeat').closest('.form-group').hide();
   $('#custom-repeat-group').hide();
   $('#edit-enabled').closest('.form-group').hide();
@@ -1659,8 +1910,16 @@ function saveScheduleItem() {
   }
   ev.duty = duty;
 
+  // Custom cycle: start offset, stored as HH:MM in "time"
+  if (ev.repeat === 'custom') {
+    const h = Math.max(0, Math.min(23, parseInt($('#edit-offset-h').val()) || 0));
+    const m = Math.max(0, Math.min(59, parseInt($('#edit-offset-m').val()) || 0));
+    ev.time = (h || m) ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` : '--:--';
+  }
+
   currentItem.data('event', ev);
   currentItem.find('.tree-leaf-duty').text(leafDutyText(ev));
+  currentItem.find('.tree-leaf-time').text(leafTimeText(ev));
   refreshNodeSummary(currentItem.closest('.tree-node'));
 
   currentItem = null;
@@ -1680,34 +1939,54 @@ function applyScheduleToServer() {
   showSaveAsDialog();
 }
 
+// Save dialog
+//   Save        - overwrites the current task; a changed name renames it
+//   Save as new - always creates a new task with the name in the field
+// The template (task 0) can only be saved as new.
 function showSaveAsDialog() {
   const isDefault = (taskIndex === 0);
   $('#new-task-name').val(isDefault ? '' : (currentTaskName || ''));
   $('#save-as-error').hide().text('');
   $('#save-as-hint').text(
     isDefault
-      ? 'Enter a name to save this as a new task.'
-      : 'Keep the same name to overwrite, or enter a new name to create a copy.'
+      ? 'The template stays as it is. Enter a name for the new task.'
+      : 'Save keeps this task (a new name renames it). Save as new creates a copy.'
   );
+  $('#save-as-confirm').toggle(!isDefault);
+  $('#save-as-new').toggleClass('btn-primary', isDefault).toggleClass('btn-outline-primary', !isDefault);
+
+  // Returns the trimmed name, or null after showing why it cannot be used.
+  // keepId: the task being overwritten may keep its own name.
+  const checkName = keepId => {
+    const name = $('#new-task-name').val().trim();
+    let error = '';
+    if (!name) {
+      error = 'Please enter a task name.';
+    } else if (name.toLowerCase() === 'default') {
+      error = '"Default" is the name of the template. Please choose another name.';
+    } else if (taskList.some(t => t.index !== keepId && t.index !== 0 &&
+                                  String(t.name).toLowerCase() === name.toLowerCase())) {
+      error = `A task named "${name}" already exists. Please choose another name.`;
+    }
+    if (error) {
+      $('#save-as-error').text(error).show();
+      return null;
+    }
+    return name;
+  };
 
   $('#save-as-confirm').off('click').on('click', function () {
-    const name = $('#new-task-name').val().trim();
-    if (!name) {
-      $('#save-as-error').text('Please enter a task name.').show();
-      return;
-    }
-    if (name.toLowerCase() === 'default') {
-      $('#save-as-error').text('"Default" is the name of the template. Please choose another name.').show();
-      return;
-    }
+    const name = checkName(taskIndex);
+    if (name === null) return;
     $('#saveAsModal').modal('hide');
-    const nameChanged = (name !== currentTaskName);
-    const isDefaultTask = (taskIndex === 0);
-    if (isDefaultTask || nameChanged) {
-      sendScheduleToServer(0, name);
-    } else {
-      sendScheduleToServer(taskIndex, name);
-    }
+    sendScheduleToServer(taskIndex, name);      // overwrite (and rename)
+  });
+
+  $('#save-as-new').off('click').on('click', function () {
+    const name = checkName(-1);                 // must differ from every task
+    if (name === null) return;
+    $('#saveAsModal').modal('hide');
+    sendScheduleToServer(0, name);              // 0: controller picks a new id
   });
 
   // Pass backdrop and keyboard options explicitly — more reliable than data attributes
@@ -1736,6 +2015,15 @@ function sendScheduleToServer(index, name) {
       console.log("Preset saved:", resp);
       currentTaskName = resp.name || name;
 
+      // Same task saved again, possibly under a new name: rename it everywhere
+      if (resp.id && resp.id === taskIndex) {
+        const task = taskList.find(t => t.index === taskIndex);
+        if (task) task.name = currentTaskName;
+        $(`#taskSelect option[value="${taskIndex}"]`).text(currentTaskName);
+        updateScheduleHeader();
+        updateTaskUI(taskStatus);
+      }
+
       // If backend assigned a new id, update frontend state
       if (resp.id && resp.id !== taskIndex) {
         taskIndex = resp.id;
@@ -1743,16 +2031,20 @@ function sendScheduleToServer(index, name) {
         // Add to dropdown if not already there
         const exists = $(`#taskSelect option[value="${taskIndex}"]`).length > 0;
         if (!exists) {
-          $('#taskSelect').append(
-            `<option value="${taskIndex}">${resp.name}</option>`
-          );
+          $('#taskSelect').append($('<option>').val(taskIndex).text(currentTaskName));
           // Add to taskList
-          taskList.push({ index: taskIndex, name: resp.name });
+          taskList.push({ index: taskIndex, name: currentTaskName });
         }
 
         $('#taskSelect').val(taskIndex);
         updateScheduleHeader();
         updateTaskUI(taskStatus);
+
+        // A new schedule becomes the selected one (unless another one runs)
+        if (taskStatus !== 'running' && taskStatus !== 'paused') {
+          $.ajax({ url: "/preset/select", type: "POST", contentType: "application/json",
+                   data: JSON.stringify({ id: taskIndex }) });
+        }
       }
     },
     error: xhr => {
@@ -1795,7 +2087,8 @@ function deleteCurrentTask() {
         taskStatus = 'stopped';
         taskStartTime = null;
       }
-      taskIndex = defaultTaskIndex();
+      // The controller selects the template when the selected one is deleted
+      taskIndex = 0;
       $('#taskSelect').val(taskIndex);
       updateTaskUI(taskStatus);
       updateScheduleHeader();
@@ -1882,15 +2175,16 @@ function buildPlayground() {
           </div>
 
 <div class="play-controls d-flex">
-  <button class="play-btn play-on" data-id="${o.id}" data-action="on">
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-      <polygon points="8,5 19,12 8,19"></polygon>
+  <!-- same look as the Dashboard start/stop buttons -->
+  <button class="btn btn-success btn-small play-btn play-on" data-id="${o.id}" data-action="on">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M4 3.3v9.4L12 8 4 3.3z" />
     </svg>
   </button>
 
-  <button class="play-btn play-off" data-id="${o.id}" data-action="off">
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-      <rect x="6" y="6" width="12" height="12"></rect>
+  <button class="btn btn-danger btn-small play-btn play-off" data-id="${o.id}" data-action="off">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+      <rect x="4" y="4" width="8" height="8" />
     </svg>
   </button>
 </div>
@@ -2377,13 +2671,37 @@ function showSessionLost() {
     '</div>');
 }
 
+// The controller says this page no longer owns the session. If nobody else
+// took it (the controller freed it because this page went quiet, e.g. the
+// phone slept), quietly reload: loading the panel claims it again.
+// Only when another phone holds it, show "Session ended".
+let sessionRecheck = false;
+function sessionGone() {
+  if (sessionLost || sessionRecheck || OFFLINE_MODE) return;
+  sessionRecheck = true;
+  $.ajax({ url: '/api/session', dataType: 'json', timeout: 5000 })
+    .done(d => {
+      if (d && !d.busy) {
+        exitGuardLeaving = true;       // no "leave site?" prompt for this reload
+        location.reload();
+      } else {
+        showSessionLost();
+      }
+    })
+    .fail(showSessionLost)
+    .always(() => { sessionRecheck = false; });
+}
+
 // Any request rejected by the controller as "not your session"
-$(document).ajaxError((event, xhr) => {
-  if (xhr.status === 403) showSessionLost();
+$(document).ajaxError((event, xhr, settings) => {
+  if (xhr.status === 403 && settings.url !== '/api/session') sessionGone();
 });
 
 // Session check. An active user sends a heartbeat (POST keeps the session
 // alive), an idle user only asks (GET does not extend the session).
+// It also runs while the page is hidden: the controller frees the session
+// when the owner page is silent for 90 s (window closed without Leave), and
+// this check is what tells it a background page is still there.
 function checkSession() {
   if (sessionLost || OFFLINE_MODE || !appReady) return;
 
@@ -2393,7 +2711,7 @@ function checkSession() {
     : $.ajax({ url: '/api/session', dataType: 'json', timeout: 5000 });
 
   request.done(d => {
-    if (d && d.owner === false) showSessionLost();
+    if (d && d.owner === false) sessionGone();
   });
   // Network errors (phone still reconnecting to Wi-Fi) are ignored:
   // the next check or a rejected command will tell.
@@ -2420,51 +2738,64 @@ window.addEventListener('online', checkSession);
    Depends on: showPage, current, currentPage, pageOrder, appReady (app.js).
    ============================================================ */
 
-let exitGuardArmed = false;   // a guard history entry is on top of the stack
-let exitGuardLeaving = false; // user confirmed leaving — stop intercepting
+// How the guard works
+// The app adds one extra history entry (same URL) above its own entry. Back
+// then only removes that entry and fires 'popstate', which the app turns into
+// "close dialog / previous screen / ask before leaving".
+//
+// Chrome skips history entries a page adds without a fresh user gesture, and
+// it wants a new gesture for every entry. So the entry is added only during a
+// tap, swipe or key press, one per gesture. After Back has used it, the next
+// touch adds it again.
+
+let exitGuardArmed = false;   // a guard entry is above the app's own entry
+let exitGuardLeaving = false; // user confirmed leaving: stop intercepting
+
+// The page is being touched/typed in right now (Chrome: transient activation)
+function userIsInteracting() {
+  return navigator.userActivation ? navigator.userActivation.isActive : true;
+}
+
+// Number of guard entries at and below the current one (0 or 1)
+function guardDepth() {
+  const st = history.state;
+  return (st && st.spaGuard) ? 1 : 0;
+}
 
 function armExitGuard() {
-  if (exitGuardArmed || exitGuardLeaving) return;
+  if (exitGuardArmed || exitGuardLeaving || !userIsInteracting()) return;
   history.pushState({ spaGuard: true }, '');
   exitGuardArmed = true;
 }
 
-// Browsers ignore history entries added without a user gesture when the user
-// presses Back, so the guard is armed on the first real interaction.
+// Every finished tap, swipe or key press re-arms the guard if Back used it.
+// These events fire after the gesture ends, so this never interferes with
+// focusing a text field or opening the on-screen keyboard.
+const EXIT_GUARD_ARM_EVENTS = ['click', 'keyup', 'touchend', 'pointerup'];
+
 function armExitGuardOnInteraction() {
-  const arm = () => {
-    armExitGuard();
-    document.removeEventListener('click', arm, true);
-    document.removeEventListener('keyup', arm, true);
-  };
-  // 'click'/'keyup' fire after the tap or key press is finished, so arming never
-  // interferes with focusing a text field or opening the on-screen keyboard
-  document.addEventListener('click', arm, true);
-  document.addEventListener('keyup', arm, true);
+  EXIT_GUARD_ARM_EVENTS.forEach(t =>
+    document.addEventListener(t, armExitGuard, { capture: true, passive: true }));
 }
 
 window.addEventListener('popstate', () => {
   if (exitGuardLeaving) return;
-  exitGuardArmed = false;              // the guard entry has just been consumed
+  exitGuardArmed = guardDepth() > 0;   // Back has just used the guard entry
 
   // 1. An open dialog: Back closes it
   const $openModal = $('.modal.show');
   if ($openModal.length) {
     $openModal.modal('hide');          // on the exit dialog this means "Stay"
-    armExitGuard();
     return;
   }
 
   // 2. Not on the first screen: Back goes one screen back
   if (appReady && current > 0) {
     showPage(pageOrder[current - 1]);
-    armExitGuard();
     return;
   }
 
-  // 3. On Dashboard: ask before leaving. The guard is re-armed right away, so
-  //    another Back while the dialog is open just closes it ("Stay").
-  armExitGuard();
+  // 3. On Dashboard: ask before leaving
   showExitDialog();
 });
 
@@ -2493,8 +2824,8 @@ function leaveApp() {
 function finishLeaving() {
   // Leave to the previous site if there is one; a captive-portal window or a
   // directly opened tab has nowhere to go back to, so show a final message.
-  // Skip the guard entry and the app's own entry in one step.
-  history.go(exitGuardArmed ? -2 : -1);
+  // Skip all guard entries and the app's own entry in one step.
+  history.go(-(guardDepth() + 1));
   setTimeout(() => {
     $('body').append(
       '<div class="exit-done">' +
@@ -2504,6 +2835,15 @@ function finishLeaving() {
       '</div>');
   }, 400);
 }
+
+// The page is going away without the Leave button (Back before any tap,
+// the captive-portal window closed, the tab closed). Release the control
+// session anyway, or the next visit shows "busy" until the 5-minute timeout.
+// sendBeacon is the one request browsers still deliver while unloading.
+window.addEventListener('pagehide', () => {
+  if (exitGuardLeaving || OFFLINE_MODE || !navigator.sendBeacon) return;
+  navigator.sendBeacon('/api/release');
+});
 
 // Reload, closing the tab or typing another address
 window.addEventListener('beforeunload', e => {
