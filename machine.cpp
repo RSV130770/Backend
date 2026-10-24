@@ -85,33 +85,31 @@ void DailyEvent::advanceToNext() {
   activationEpoch = next;
 }
 
+// A daily event belongs to the task from the start (midnight) of its first
+// day: task start day + afterDays. Its activation is the most recent
+// occurrence of HH:MM since then, so the scheduler applies the state that
+// should be in effect right now (after a start, a reboot, or the clock set
+// back); if its first day has not come yet, its first occurrence.
 void DailyEvent::computeActivation() {
-    // Base day = scheduler start day + afterDays
-    time_t base = schedulerStartEpoch + afterDays * 86400;
+  const time_t begins = (time_t)clockTimeOnTaskDay(afterDays, 0, 0);
 
-    // Build today's HH:MM
-    tm t = NOW;
-    t.tm_hour = hour;
-    t.tm_min  = minute;
-    t.tm_sec  = 0;
+  tm t = NOW;
+  t.tm_hour = hour;
+  t.tm_min  = minute;
+  t.tm_sec  = 0;
+  const time_t today  = mktime(&t);
+  const time_t latest = (today <= (time_t)NOW_EPOCH) ? today : today - 86400;
 
-    time_t todayEvent = mktime(&t);
+  if (latest >= begins) {
+    activationEpoch = latest;
+    return;
+  }
+  activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);   // first one
+}
 
-    // If today is before base day → schedule at base day
-    if (todayEvent < base) {
-        tm baseDate = *localtime(&base);
-        baseDate.tm_hour = hour;
-        baseDate.tm_min  = minute;
-        baseDate.tm_sec  = 0;
-        activationEpoch = mktime(&baseDate);
-        return;
-    }
-
-    // Otherwise today's time, even if it has already passed: the scheduler
-    // then applies the newest passed event of each channel (so after a
-    // reboot at noon the lights come back on instead of waiting for
-    // tomorrow) and moves the older ones to the next day.
-    activationEpoch = todayEvent;
+bool DailyEvent::isExpired() const {
+  if (durationDays == 0) return false;
+  return NOW_EPOCH >= clockTimeOnTaskDay((uint16_t)afterDays + durationDays, 0, 0);
 }
 
 void DailyEvent::ToNextSwitch() const {
@@ -147,14 +145,10 @@ void DailyEvent::applyAt() {
   // Apply today's state
   applyTo();
 
-  // Schedule next day's activation at the same HH:MM
-  tm next = NOW;
-  next.tm_mday += 1;
-  next.tm_hour = hour;
-  next.tm_min  = minute;
-  next.tm_sec  = 0;
-
-  activationEpoch = mktime(&next);
+  // Next occurrence of HH:MM after now. Not simply "tomorrow": when the
+  // state is restored after a reboot or a clock change at 05:00, the
+  // last-night 22:30 "off" applied now must still switch off today at 22:30.
+  advanceToNext();
 }
 
 //---
@@ -207,8 +201,8 @@ void CustomEvent::computeActivation() {
 
 // Clock time HH:MM on the day (task start day + afterDays). The web editor
 // shows once events and pause points with a clock time, not as an offset.
-uint32_t clockTimeOnTaskDay(uint8_t afterDays, uint8_t hour, uint8_t minute) {
-  time_t day = (time_t)schedulerStartEpoch + (time_t)afterDays * 86400;
+uint32_t clockTimeOnTaskDay(uint16_t days, uint8_t hour, uint8_t minute) {
+  time_t day = (time_t)schedulerStartEpoch + (time_t)days * 86400;
   tm t = *localtime(&day);
   t.tm_hour = hour;
   t.tm_min  = minute;

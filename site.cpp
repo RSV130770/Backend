@@ -302,7 +302,7 @@ void handleSite() {
 
     if (isAuthorized(req)) {
       lastActivityMs = millis();
-      req->send(SPIFFS, "/index.html", "text/html");
+      sendFresh(req, "/index.html", "text/html");
       return;
     }
     if (!sessionFree()) {
@@ -312,6 +312,7 @@ void handleSite() {
     claimSession(req);
     AsyncWebServerResponse *res =
       req->beginResponse(SPIFFS, "/index.html", "text/html");
+    res->addHeader("Cache-Control", "no-store");   // portal window: no stale page
     attachCookie(res);
     req->send(res);
   };

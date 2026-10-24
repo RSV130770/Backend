@@ -51,7 +51,7 @@ static FreezeEvent* findDueFreeze(uint32_t effectiveNow) {
 // point, events that begin after it are held back.
 static uint32_t eventBegins(const MachineEvent* ev) {
   if (ev->type == EVENT_DAILY)
-    return schedulerStartEpoch + ev->afterDays * 86400u;
+    return clockTimeOnTaskDay(ev->afterDays, 0, 0);
   return ev->activationEpoch;
 }
 // -----------------------------
@@ -193,6 +193,19 @@ void schedulerTick() {
   if (TASK_STATUS != T_START && TASK_STATUS != T_FROZEN) return;
 
   updateNow();
+
+  // The clock was set back (e.g. synchronised with the phone): the daily
+  // switch times ahead are now wrong, so work out the state again
+  static uint32_t lastTickEpoch = 0;
+  if (lastTickEpoch != 0 && NOW_EPOCH + 60 < lastTickEpoch) {
+    Serial.printf("Clock moved back by %lu s - schedule re-applied\n",
+                  (unsigned long)(lastTickEpoch - NOW_EPOCH));
+    lastTickEpoch = NOW_EPOCH;
+    computeAllActivationTimes();
+    retrospectiveApply();
+    return;
+  }
+  lastTickEpoch = NOW_EPOCH;
 
   uint32_t effectiveNow = NOW_EPOCH - (uint32_t)FROZEN_DAYS * 86400u;
 

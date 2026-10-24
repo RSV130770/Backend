@@ -659,17 +659,13 @@ void handlePresetList(AsyncWebServerRequest *req) {
   uint32_t t0 = millis();
   ensureDefaultPreset();
 
-  // ~60 bytes per preset in the answer
-  DynamicJsonDocument doc(6144);
-  JsonArray arr = doc.createNestedArray("presets");
-  if (doc.capacity() == 0) {
-    Serial.printf("handlePresetList: out of memory (free heap %u)\n", ESP.getFreeHeap());
-    sendError(req, 503, "out of memory");
-    return;
-  }
+  // The answer is written entry by entry straight into the response, so its
+  // size does not depend on the number of presets (up to 255)
+  AsyncResponseStream *res = req->beginResponseStream("application/json");
+  res->addHeader("Cache-Control", "no-store");
 
   // Read only the descriptive fields; the schedule itself can be large.
-  // Both documents live on the heap: the web server task has a small stack.
+  // The documents live on the heap: the web server task has a small stack.
   DynamicJsonDocument filter(512);
   const char *fields[] = { "id", "name", "nameRu", "latin", "category",
                            "totalDays", "difficulty", "recommendedMethod",
@@ -677,6 +673,8 @@ void handlePresetList(AsyncWebServerRequest *req) {
   for (const char *k : fields) filter[k] = true;
   DynamicJsonDocument meta(1024);
 
+  res->print("{\"presets\":[");
+  unsigned count = 0;
   for (uint8_t id : listPresetIds()) {
     char path[32];
     presetPath(id, path, sizeof(path));
@@ -692,30 +690,27 @@ void handlePresetList(AsyncWebServerRequest *req) {
       continue;
     }
 
-    // set() copies the strings; assigning meta["name"] directly would only
-    // store a pointer into meta, which is reused for the next file
-    JsonObject o = arr.createNestedObject();
-    o.set(meta.as<JsonObjectConst>());
-    o["id"] = id;                              // the file number counts
-    if (!o.containsKey("name"))    o["name"]    = "";
-    if (!o.containsKey("builtIn")) o["builtIn"] = false;
+    meta["id"] = id;                            // the file number counts
+    if (!meta.containsKey("name"))    meta["name"]    = "";
+    if (!meta.containsKey("builtIn")) meta["builtIn"] = false;
+    if (count++) res->print(",");
+    serializeJson(meta, *res);
   }
 
-  // Current running preset info
-  JsonObject cur   = doc.createNestedObject("current");
+  // Current preset info
+  StaticJsonDocument<256> cur;
   cur["presetId"]  = PRESET_ID;
   cur["status"]    = taskStatusToString();
   cur["startTime"] = formatStartTime();
   if (TASK_STATUS == T_FROZEN && activeFreeze)
     cur["pauseMessage"] = activeFreeze->message;
+  res->print("],\"current\":");
+  serializeJson(cur, *res);
+  res->print("}");
 
-  // Stream the answer instead of building a second copy in a String
-  AsyncResponseStream *res = req->beginResponseStream("application/json");
-  res->addHeader("Cache-Control", "no-store");
-  serializeJson(doc, *res);
   req->send(res);
   Serial.printf("handlePresetList done: %u presets, %lu ms, free heap %u\n",
-                arr.size(), (unsigned long)(millis() - t0), ESP.getFreeHeap());
+                count, (unsigned long)(millis() - t0), ESP.getFreeHeap());
 }
 
 void handleApiState(AsyncWebServerRequest *req) {

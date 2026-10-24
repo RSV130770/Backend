@@ -63,6 +63,9 @@ extern std::vector<MachineEvent *> EVENTS;
 // --
 // DailyEvent
 // --
+// Clock time HH:MM on the day (task start day + days)
+uint32_t clockTimeOnTaskDay(uint16_t days, uint8_t hour, uint8_t minute);
+
 class DailyEvent : public MachineEvent {
 public:
   uint32_t rampMs = 0;
@@ -86,6 +89,9 @@ public:
 
   // Move activation to the next HH:MM after now, without applying
   void advanceToNext();
+
+  // A daily group with a duration ends at midnight after its last day
+  bool isExpired() const override;
 };
 
 // --
@@ -159,8 +165,6 @@ public:
   bool fromJson(const JsonObject &o) override;
 };
 
-// Clock time HH:MM on the day (task start day + afterDays)
-uint32_t clockTimeOnTaskDay(uint8_t afterDays, uint8_t hour, uint8_t minute);
 
 
 // A pause point: when it is reached the task waits for the user ("frozen"):

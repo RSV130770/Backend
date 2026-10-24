@@ -150,6 +150,8 @@ void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t l
   ch.changed = true;
   req->send(200, "application/json", "{\"status\":\"OK\"}");
 }
+bool requireSession(AsyncWebServerRequest *req);   // site.cpp
+
 void setupPlayground() {
   // Playground: direct output control
   server.on(
@@ -157,6 +159,8 @@ void setupPlayground() {
     [](AsyncWebServerRequest *req) {},
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (index != 0) return;                 // small body: one chunk
+      if (!requireSession(req)) return;       // only the session owner
       handlePlaygroundControl(req, data, len);
     });
 
@@ -166,6 +170,8 @@ void setupPlayground() {
     [](AsyncWebServerRequest *req) {},
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (index != 0) return;
+      if (!requireSession(req)) return;
       handlePlaygroundParams(req, data, len);
     });
 }

@@ -8,6 +8,7 @@
 //#include "DHTesp.h"
 #include "ESPAsyncWebServer.h"
 #include <AsyncTCP.h>
+bool requireSession(AsyncWebServerRequest *req);   // site.cpp
 #include <esp_task_wdt.h>
 #include <Ticker.h>
 #include "Wire.h"
@@ -186,6 +187,7 @@ void setupRTC() {
     [](AsyncWebServerRequest *request) {},
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t) {
+      if (!requireSession(request)) return;   // only the session owner sets the clock
       StaticJsonDocument<100> doc;
       if (deserializeJson(doc, data, len)) {
         request->send(400, "application/json", "{\"error\":\"bad json\"}");
