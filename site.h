@@ -61,9 +61,11 @@ void handleSite();
 //  OS captive-portal probes → redirect to "/" so the system browser opens
 //  the SPA directly (no separate login page — WPA2 already authenticated).
 //
+// The farm network address is read each time (IP, .ino): it can move when
+// the home network uses the same range (homenet.cpp).
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
-  explicit CaptiveRequestHandler(IPAddress ip) : apIP(ip) {}
+  CaptiveRequestHandler() {}
 
   bool canHandle(AsyncWebServerRequest *request) const override {
   //Serial.printf("REQ host=%s url=%s ua=%s\n",
@@ -75,23 +77,20 @@ public:
     // Requests to our own addresses are served normally.
     const String &host = request->host();
     if (host.length() == 0) return false;
-    if (host == apIP.toString()) return false;
+    if (host == IP.toString()) return false;
     if (WiFi.status() == WL_CONNECTED && host == WiFi.localIP().toString()) return false;
     return true;
   }
 
   void handleRequest(AsyncWebServerRequest *request) override {
     AsyncWebServerResponse *res = request->beginResponse(302, "text/plain", "");
-    res->addHeader("Location", "http://" + apIP.toString() + "/");
+    res->addHeader("Location", "http://" + IP.toString() + "/");
 //    res->addHeader("Location", "http://" + apIP.toString() + "/portal");
     // Phones must not cache the answer to their connectivity check
     res->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   //  Serial.println("  -> redirected to portal");
     request->send(res);
   }
-
-private:
-  IPAddress apIP;
 };
 
 #endif  // SITE_H

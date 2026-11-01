@@ -5,6 +5,7 @@
 #include <WiFiClient.h>
 #include <SPIFFS.h>
 #include "site.H"
+#include "homenet.h"
 //#include "DHTesp.h"
 #include "ESPAsyncWebServer.h"
 #include <AsyncTCP.h>
@@ -268,7 +269,7 @@ void slider_setting(AsyncWebServerRequest *request) {
   int ch    = request->getParam("channel", true)->value().toInt();
   int value = request->getParam("value",   true)->value().toInt();
 
-  if (ch < 0 || ch >= OUTPUT_COUNT || value < 0 || value > 100) {
+  if (ch < 0 || ch >= OUTPUT_COUNT || OUT[ch].mode == MODE_MESSAGE || value < 0 || value > 100) {
     request->send(400, "text/plain", "Invalid parameters");
     return;
   }
@@ -311,7 +312,9 @@ void setup() {
   defaultPassword = readFile(SPIFFS, "/pass.txt");
   idString        = readFile(SPIFFS, "/register.txt");
 
-  // Start Access Point
+  // Start Access Point (its address may have been moved out of the home
+  // network's range before: homenet.cpp)
+  IP = homeNetLoadApIp();
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(IP, IP, IPAddress(255, 255, 255, 0));
   // Use password from /pass.txt if >= 8 chars, otherwise open network
@@ -353,5 +356,6 @@ void setup() {
 void loop() {
   dnsServer.processNextRequest();
   tickWifiScan();   // completes async scan and updates cache without blocking
+  homeNetLoop();    // joins / watches the home network in the background
   delay(1);
 }

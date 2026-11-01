@@ -30,7 +30,8 @@ Output OUT[OUTPUT_COUNT] = {
   Output(PUMP_IO, ID_PUMP, MODE_SOFTSTART, "Pump", "/shower.svg", "background-color:#C7C7F1;", false),                  // 5
   Output(MIST_IO, ID_MIST, MODE_NO_RAMP, "Mist", "/mist.svg", "background-color:#C7C7F1;", false),                      // 6
   Output(FAN_IO, ID_FAN, MODE_ANALOG_RAMP, "Fan", "/fan.svg", "background-color:#C7C7F1;", false),                      // 7
-  Output(AUX_IO, ID_AUX, MODE_ANALOG_RAMP, "AUX", "/aux.svg", "background-color:#C7C7F1;", false)                       // 8
+  Output(AUX_IO, ID_AUX, MODE_ANALOG_RAMP, "AUX", "/aux.svg", "background-color:#C7C7F1;", false),                      // 8
+  Output(NO_GPIO, ID_MESSAGE, MODE_MESSAGE, "Message", "/message.svg", "background-color:#FFE7A3;", false)          // 9 virtual
 };
 
 static uint8_t nextLedcChannel = 0;
@@ -68,6 +69,8 @@ void initLEDC() {
   // 2) Reconfigure all LEDC channels for every Output that uses PWM
   for (int i = 0; i < OUTPUT_COUNT; i++) {
     Output &o = OUT[i];
+
+    if (o.mode == MODE_MESSAGE) continue;   // virtual, no pin
 
     if (o.mode == MODE_NO_RAMP) {
       // pure digital, skip LEDC
@@ -146,7 +149,9 @@ Output::Output(uint8_t pin,
     rampEndEpoch(0),
     nextDailyEpoch(0),
   changed(true) {
-    if (mode == MODE_NO_RAMP) {
+    if (mode == MODE_MESSAGE) {
+      ledcChannel = 255;   // virtual, no pin
+    } else if (mode == MODE_NO_RAMP) {
       pinMode(gpio, OUTPUT);
       digitalWrite(gpio, LOW);
     } else {
@@ -171,6 +176,7 @@ void Output::reset() {
   // Reset values
   current = 0;
   target = 0;
+  text = "";
 
   // Write hardware immediately
   writePWM(0);
@@ -180,6 +186,10 @@ void Output::reset() {
 }
 
 void Output::writePWM(int value) {
+  if (mode == MODE_MESSAGE) {
+    current = (value > 0 ? 255 : 0);   // no hardware: on/off only
+    return;
+  }
   if (mode == MODE_NO_RAMP) {
     // Simple ON/OFF
     digitalWrite(gpio, value);
@@ -222,6 +232,13 @@ void Output::setTarget(int value) {
   changed = true;
 
   switch (mode) {
+
+    case MODE_MESSAGE:
+      current = target = (value > 0 ? 255 : 0);
+      if (target == 0) text = "";
+      ramping = false;
+      delta = 0;
+      return;
 
     case MODE_NO_RAMP:
       current = (value > 0 ? 255 : 0);
@@ -266,7 +283,7 @@ void Output::setTarget(int value) {
   }
 }
 void Output::update() {
-  if (mode == MODE_NO_RAMP) {
+  if (mode == MODE_NO_RAMP || mode == MODE_MESSAGE) {
     // Nothing to update, ON/OFF already handled
     return;
   }
@@ -350,7 +367,7 @@ void setupOutputs() {
       serializeOutput(o, OUT[i]);
 
       // Capability flags (still needed by frontend)
-      o["supportsDuty"] = (OUT[i].mode != MODE_NO_RAMP);
+      o["supportsDuty"] = (OUT[i].mode != MODE_NO_RAMP && OUT[i].mode != MODE_MESSAGE);
       o["supportsRamp"] = (OUT[i].mode == MODE_ANALOG_RAMP);
       o["supportsSoftstart"] = (OUT[i].mode == MODE_SOFTSTART);
     }

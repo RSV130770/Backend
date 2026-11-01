@@ -1,4 +1,5 @@
 #include "site.h"
+#include "homenet.h"
 #include <SPIFFS.h>
 #include <WiFi.h>
 
@@ -60,6 +61,8 @@ void tickWifiScan() {
   _scanJson    = json;
   _scanPending = false;
 }
+
+bool wifiScanBusy() { return _scanPending; }
 
 // Kick off a new async scan (safe to call from any context).
 static void startWifiScan() {
@@ -246,7 +249,7 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
 <body>
   <h2>MiniFarm</h2>
   <p>You are connected to the farm.</p>
-  <a href="http://192.168.4.1/">Open control panel</a>
+  <a href="/">Open control panel</a>
 </body>
 </html>
 )rawliteral";
@@ -269,26 +272,12 @@ static void sendFresh(AsyncWebServerRequest *req, const char *path, const char *
 void handleSite() {
 
   // AP already started in setup() before handleSite() is called.
-  // Try STA connection if credentials saved.
-  if (loadWifiCredentials()) {
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
-    if (WiFi.status() == WL_CONNECTED) {
-      stationConnected = true;
-      Serial.printf("STA connected: %s  IP: %s\n",
-                    wifiSSID.c_str(), WiFi.localIP().toString().c_str());
-    } else {
-      Serial.println("STA connect failed — staying in AP-only mode");
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_AP);
-    }
-  }
-
+  // The home network (if saved) is joined in the background by homeNetLoop()
+  // after this first scan: boot does not wait for the router any more.
   startWifiScan();
+  homeNetBegin();
 
-  server.addHandler(new CaptiveRequestHandler(WiFi.softAPIP()));
+  server.addHandler(new CaptiveRequestHandler());
 
   // Root / index.html
   auto serveIndex = [](AsyncWebServerRequest *req) {
@@ -396,8 +385,8 @@ void handleSite() {
     if (!isAuthorized(req)) { req->send(403); return; }
     lastActivityMs = millis();
 
-    if (_scanPending) {
-      // Still scanning — tell the client to retry in a moment
+    if (_scanPending || homeNetBusy()) {
+      // Still scanning (or joining the home network) — retry in a moment
       req->send(202, "application/json", "{\"status\":\"scanning\"}");
       return;
     }
@@ -410,26 +399,30 @@ void handleSite() {
   server.on("/wifi/status", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (!isAuthorized(req)) { req->send(403); return; }
     lastActivityMs = millis();
-    String json;
-    if (stationConnected && WiFi.status() == WL_CONNECTED) {
-      json = "{\"mode\":\"client\",\"connected\":true"
-             ",\"ssid\":\"" + WiFi.SSID() + "\""
-             ",\"ip\":\""   + WiFi.localIP().toString() + "\""
-             ",\"rssi\":"   + String(WiFi.RSSI()) + "}";
-    } else {
-      json = "{\"mode\":\"ap\",\"connected\":false}";
+    // Old fields (mode, connected, ssid, ip, rssi) + "home": the details
+    DynamicJsonDocument d(1024);
+    const bool up = stationConnected && WiFi.status() == WL_CONNECTED;
+    d["mode"] = up ? "client" : "ap";
+    d["connected"] = up;
+    if (up) {
+      d["ssid"] = WiFi.SSID();
+      d["ip"]   = WiFi.localIP().toString();
+      d["rssi"] = WiFi.RSSI();
     }
+    homeNetStatus(d.createNestedObject("home"));
+    String json;
+    serializeJson(d, json);
     req->send(200, "application/json", json);
   });
 
   // POST /wifi/connect  body: { "ssid":"...", "password":"..." }
-  // delay() up to 12 s is acceptable here — user is waiting for the result.
+  // Saves the network and starts joining it in the background; the page
+  // follows the progress with GET /wifi/status ("home.state").
   server.on("/wifi/connect", HTTP_POST,
     [](AsyncWebServerRequest *req) {},
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t, size_t) {
       if (!isAuthorized(req)) { req->send(403); return; }
-
       StaticJsonDocument<256> doc;
       if (deserializeJson(doc, data, len)) {
         req->send(400, "application/json", "{\"error\":\"invalid json\"}");
@@ -441,28 +434,10 @@ void handleSite() {
         req->send(400, "application/json", "{\"error\":\"missing fields\"}");
         return;
       }
-
-      WiFi.disconnect(true);
-      delay(100);
-      WiFi.mode(WIFI_AP_STA);
-      WiFi.begin(ssid.c_str(), pass.c_str());
-
-      uint32_t t0 = millis();
-      while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(200);
-
-      if (WiFi.status() != WL_CONNECTED) {
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_AP);
-        req->send(401, "application/json", "{\"error\":\"Wrong password\"}");
-        return;
-      }
-
-      stationConnected = true;
       saveWifiCredentials(ssid, pass);
       lastActivityMs = millis();
-
-      String out = "{\"ip\":\"" + WiFi.localIP().toString() + "\"}";
-      req->send(200, "application/json", out);
+      homeNetRestart();
+      req->send(202, "application/json", "{\"status\":\"connecting\"}");
     });
 
   server.on("/wifi/disconnect", HTTP_POST,
@@ -470,11 +445,8 @@ void handleSite() {
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t, size_t) {
       if (!isAuthorized(req)) { req->send(403); return; }
-      stationConnected = false;
       saveWifiCredentials("", "");
-      WiFi.disconnect(true);
-      delay(100);
-      WiFi.mode(WIFI_AP);
+      homeNetStop();
       req->send(200, "application/json", "{\"status\":\"disconnected\"}");
     });
 
@@ -502,6 +474,14 @@ void handleSite() {
     json += ",\"sta_ssid\":\"" + staSsid + "\"";
     json += ",\"sta_saved\":"     + String(staSaved     ? "true" : "false");
     json += ",\"sta_connected\":" + String(staConnected ? "true" : "false");
+    {
+      // Home network details: address in use, IP settings, farm network address
+      DynamicJsonDocument h(1024);
+      homeNetStatus(h.to<JsonObject>());
+      String hs;
+      serializeJson(h, hs);
+      json += ",\"home\":" + hs;
+    }
     json += "}";
     req->send(200, "application/json", json);
   });
@@ -513,10 +493,23 @@ void handleSite() {
       if (!isAuthorized(req)) { req->send(403); return; }
       lastActivityMs = millis();
 
-      StaticJsonDocument<256> doc;
-      if (deserializeJson(doc, data, len)) {
+      DynamicJsonDocument doc(1024);     // AP + home network + IP settings
+      if (deserializeJson(doc, data, len) || doc.overflowed()) {
         req->send(400, "application/json", "{\"error\":\"invalid json\"}");
         return;
+      }
+
+      // IP settings first: nothing is saved if they are wrong
+      if (doc.containsKey("ip")) {
+        String err = homeNetSaveIpConfig(doc["ip"]);
+        if (err.length()) {
+          StaticJsonDocument<192> e;
+          e["error"] = err;
+          String out;
+          serializeJson(e, out);
+          req->send(400, "application/json", out);
+          return;
+        }
       }
 
       String apSsid = doc["ap_ssid"] | "";

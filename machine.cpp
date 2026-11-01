@@ -18,6 +18,7 @@ void MachineEvent::toJson(JsonObject &o) const {
   // convert raw PWM → percent
   uint8_t pct = (uint8_t)((duty * 100) / 255);
   o["duty"] = pct;
+  if (message.length()) o["message"] = message;
 }
 
 bool MachineEvent::fromJson(const JsonObject &o) {
@@ -35,6 +36,7 @@ bool MachineEvent::fromJson(const JsonObject &o) {
   duty = (pct * 255) / 100;
   // "expireAfterDays" from the web editor; "long" from older files
   durationDays = o["expireAfterDays"] | (int)(o["long"] | 0);
+  message = (const char *)(o["message"] | "");
   return true;
 }
 void MachineEvent::ToNextSwitch() const {

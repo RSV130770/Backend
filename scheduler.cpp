@@ -1,6 +1,7 @@
 #include "scheduler.h"
 #include <Ticker.h>
 #include <algorithm>
+#include <SPIFFS.h>
 
 Ticker schedulerTicker;
 extern AsyncWebServer server;
@@ -14,9 +15,81 @@ static MachineEvent* lastApplied[OUTPUT_COUNT] = { nullptr };
 // and a stale pointer would be read on the next tick (use after free)
 FreezeEvent* activeFreeze = nullptr;
 
+// Message output: the switch-on shown now and the last one the user
+// confirmed with OK. A switch-on is known by the time it began (a daily
+// message begins a new one every day, a custom one every cycle). The
+// confirmed one is kept in a file, so a reboot does not show it again.
+static uint32_t noticeKey = 0;
+static uint32_t okKey     = 0;
+static bool     okLoaded  = false;
+static const char *NOTICE_OK_FILE = "/notice_ok.txt";
+
+static void loadNoticeOk() {
+  if (okLoaded) return;
+  okLoaded = true;
+  if (!SPIFFS.exists(NOTICE_OK_FILE)) return;
+  File f = SPIFFS.open(NOTICE_OK_FILE, "r");
+  if (!f) return;
+  okKey = (uint32_t)strtoul(f.readString().c_str(), nullptr, 10);
+  f.close();
+}
+
 void schedulerForgetEvents() {
   for (int ch = 0; ch < OUTPUT_COUNT; ch++) lastApplied[ch] = nullptr;
   activeFreeze = nullptr;
+  noticeKey = 0;
+}
+
+// When the current switch-on of an event began
+static uint32_t switchOnKey(const MachineEvent* ev) {
+  if (ev->type == EVENT_CUSTOM) {
+    const CustomEvent* c = static_cast<const CustomEvent*>(ev);
+    uint32_t cycle = c->onSeconds + c->offSeconds;
+    if (cycle && NOW_EPOCH > ev->activationEpoch)
+      return ev->activationEpoch + ((NOW_EPOCH - ev->activationEpoch) / cycle) * cycle;
+  }
+  return ev->activationEpoch;
+}
+
+// Apply an event; for the Message output also set or clear the text
+static void applyEvent(MachineEvent* ev) {
+  const uint32_t key = switchOnKey(ev);   // before applyAt moves a daily one
+  if (ev->channelId == ID_MESSAGE) loadNoticeOk();
+  const bool confirmed = (ev->channelId == ID_MESSAGE && key == okKey);
+  if (confirmed && ev->type == EVENT_CUSTOM) return;  // hidden this cycle
+  ev->applyAt();
+  if (ev->channelId != ID_MESSAGE) return;
+
+  Output &m = OUT[ID_MESSAGE];
+  if (m.target == 0) {                     // an Off event: hide the message
+    m.text = "";
+    noticeKey = 0;
+    return;
+  }
+  if (confirmed) {                         // already confirmed with OK
+    m.setTarget(0);
+    return;
+  }
+  if (key != noticeKey)
+    Serial.printf("Message: %s\n", ev->message.c_str());
+  m.text    = ev->message.length() ? ev->message : String("Message");
+  noticeKey = key;
+}
+
+const char* schedulerNotice() {
+  const Output &m = OUT[ID_MESSAGE];
+  return (m.target > 0 && m.text.length()) ? m.text.c_str() : nullptr;
+}
+
+void schedulerNoticeOk() {
+  if (noticeKey != 0 && noticeKey != okKey) {
+    okKey = noticeKey;
+    File f = SPIFFS.open(NOTICE_OK_FILE, "w");   // written only on OK
+    if (f) { f.print(String(okKey)); f.close(); }
+  }
+  noticeKey = 0;
+  OUT[ID_MESSAGE].setTarget(0);
+  Serial.println("Message confirmed with OK");
 }
 
 // Number the pause points in time order, so "confirmed up to N" (E)
@@ -86,6 +159,7 @@ void updateNow() {
 // -----------------------------
 static void computeAllActivationTimes() {
   for (auto* ev : EVENTS) {
+    ev->done = false;
     ev->computeActivation();
   }
 }
@@ -93,10 +167,16 @@ static void computeAllActivationTimes() {
 // Daily events whose time has passed but that were not the newest for their
 // channel (e.g. the 06:30 "on" when it is already after the 22:30 "off")
 // must move to their next occurrence, or they would fire on the next tick.
+// Once events are the same: applied once, when they are the newest for their
+// channel; afterwards (or when a newer event won) they are done, otherwise
+// an old once event would take the channel back from a daily event as soon
+// as that one moves on to tomorrow.
 static void skipPassedDailyEvents(uint32_t effectiveNow) {
   for (auto* ev : EVENTS) {
     if (ev->type == EVENT_DAILY && ev->activationEpoch <= effectiveNow)
       static_cast<DailyEvent*>(ev)->advanceToNext();
+    else if (ev->type == EVENT_ONCE && ev->activationEpoch <= effectiveNow)
+      ev->done = true;
   }
 }
 
@@ -153,7 +233,7 @@ static void retrospectiveApply() {
 
   for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
     if (bestPast[ch]) {
-      bestPast[ch]->applyAt();
+      applyEvent(bestPast[ch]);
       lastApplied[ch] = bestPast[ch];
       Serial.print("Event: ");
       Serial.print(printHHMM(bestPast[ch]->hour, bestPast[ch]->minute));
@@ -233,6 +313,7 @@ void schedulerTick() {
   for (auto* ev : EVENTS) {
     if (!ev->enabled) continue;
     if (ev->type == EVENT_FREEZE) continue;
+    if (ev->done) continue;                 // once event already applied
     if (eventBegins(ev) > holdAfter) continue;
 
     if (ev->isExpired()) continue;
@@ -256,7 +337,7 @@ void schedulerTick() {
   // Apply and compute remaining per channel
   for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
     if (bestPast[ch]) {
-      bestPast[ch]->applyAt();
+      applyEvent(bestPast[ch]);
       lastApplied[ch] = bestPast[ch];
     } else if (lastApplied[ch] && lastApplied[ch]->isExpired()) {
       // Last active event just expired — zero the output

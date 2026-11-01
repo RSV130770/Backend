@@ -20,7 +20,7 @@ void handlePlaygroundParams(AsyncWebServerRequest *req, uint8_t *data, size_t le
   // 1. Validate channel ID
   //---
   int id = doc["id"] | -1;
-  if (id < 0 || id >= OUTPUT_COUNT) {
+  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].mode == MODE_MESSAGE) {
     req->send(400, "application/json", "{\"error\":\"Invalid ID\"}");
     return;
   }
@@ -69,7 +69,7 @@ void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t l
     return;
   }
   int id = doc["id"] | -1;
-  if (id < 0 || id >= OUTPUT_COUNT) {
+  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].mode == MODE_MESSAGE) {
     req->send(400, "application/json", "{\"error\":\"Invalid ID\"}");
     Serial.println("Invalid ID");
     return;

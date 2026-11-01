@@ -15,6 +15,8 @@ void schedulerTick();
 void setupScheduler(void);
 void schedulerStart();
 void schedulerForgetEvents();   // call when EVENTS are deleted
+const char* schedulerNotice();  // text of the Message output, or nullptr
+void schedulerNoticeOk();       // the user confirmed the message (OK)
 // Start with a given start time; recovering = true keeps FROZEN_DAYS
 // (used after a reboot or when the running preset was edited)
 void schedulerStartAt(uint32_t startEpoch, bool recovering);

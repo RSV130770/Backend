@@ -29,7 +29,10 @@
 #define ID_MIST 6   // 24V MIST
 #define ID_FAN 7    // 5V aux1
 #define ID_AUX 8    // 5V aux2
-#define ID_SOUND 9  // sound output
+#define ID_MESSAGE 9  // virtual output: a text message on the dashboard
+#define ID_SOUND 10   // sound output (not in OUT yet)
+
+#define NO_GPIO 255   // virtual outputs have no pin
 
 
 #define LEDC_RESOLUTION LEDC_TIMER_8_BIT
@@ -38,7 +41,7 @@
 #define LEDC_MODE LEDC_HIGH_SPEED_MODE
 #define LEDC_TIMER_BASE LEDC_TIMER_0
 #define LEDC_TIMER_SOFTSTART LEDC_TIMER_1
-#define OUTPUT_COUNT  9
+#define OUTPUT_COUNT  10
 // ---------------------------------------------
 // Output operating modes
 // ---------------------------------------------
@@ -47,7 +50,8 @@ enum OutputMode {
   MODE_SOFTSTART,
   MODE_ANALOG_DIRECT,
   MODE_ANALOG_RAMP,
-  MODE_SOUND
+  MODE_SOUND,
+  MODE_MESSAGE      // virtual: "on" shows a text on the dashboard, no hardware
 };
 
 // ---------------------------------------------
@@ -71,6 +75,9 @@ public:
   String icon;
   String style;
   bool invert;
+
+  // MODE_MESSAGE: the text shown while the output is on
+  String text;
 
   // Duty control
   float current;
@@ -136,6 +143,7 @@ public:
       case MODE_SOFTSTART: return "softstart";
       case MODE_ANALOG_DIRECT: return "analog_direct";
       case MODE_ANALOG_RAMP: return "analog_ramp";
+      case MODE_MESSAGE: return "message";
       default: return "unknown";
     }
   }

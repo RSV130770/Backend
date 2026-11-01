@@ -714,12 +714,15 @@ void handlePresetList(AsyncWebServerRequest *req) {
 }
 
 void handleApiState(AsyncWebServerRequest *req) {
-  StaticJsonDocument<1024> resp;
+  DynamicJsonDocument resp(1536);   // 10 outputs + sensors + messages
   fillDashboardState(resp);
   // Task status for the page, and the message of a reached pause point
   resp["taskStatus"] = taskStatusToString();
   if (TASK_STATUS == T_FROZEN && activeFreeze)
     resp["pauseMessage"] = activeFreeze->message;
+  // Text of the Message output (confirmed with OK on the dashboard)
+  if (const char *n = schedulerNotice()) resp["notice"] = n;
+  if (resp.overflowed()) Serial.println("handleApiState: document too small");
   String out;
   serializeJson(resp, out);
   req->send(200, "application/json", out);
@@ -735,6 +738,14 @@ void setupTasks() {
 
   server.on("/preset/list", HTTP_GET,
     [](AsyncWebServerRequest *req) { handlePresetList(req); });
+
+  // The user tapped OK on the message
+  server.on("/api/notice/ok", HTTP_POST,
+    [](AsyncWebServerRequest *req) {
+      if (!requireSession(req)) return;
+      schedulerNoticeOk();
+      req->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
 
   server.on("/preset/content", HTTP_GET,
     [](AsyncWebServerRequest *req) { handlePresetContent(req); });

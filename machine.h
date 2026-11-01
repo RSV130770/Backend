@@ -33,6 +33,8 @@ public:
   uint8_t minute = 0;
   uint8_t afterDays = 0;
   bool enabled = true;
+  String message;   // Message output: the text; pause point: its text
+  bool done = false; // once event: applied (or overridden by a later one)
 
   uint32_t activationEpoch = 0;  // cached activation time
 
@@ -173,7 +175,6 @@ public:
 // the user presses Continue. "message" is shown on the dashboard meanwhile.
 class FreezeEvent : public MachineEvent {
 public:
-  String  message;   // text for the user, from the web editor
   uint8_t seq = 0;   // order among the task's pause points (0, 1, ...)
 
   FreezeEvent() {
