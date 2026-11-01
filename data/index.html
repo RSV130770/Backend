@@ -57,12 +57,6 @@
 	<div class="col-12 p-0">
 	<label for="taskSelect" id="taskSelectLabel">Select Task</label>
     	<label id="taskStatusLabel" class="text-muted d-block"></label>
-	<!-- The task reached a pause point and waits for the user -->
-	<div id="pause-banner" class="alert alert-warning d-none" role="status">
-	  <div class="font-weight-bold">The task is waiting</div>
-	  <div id="pause-message" class="mb-2"></div>
-	  <button class="btn btn-warning btn-small" id="pause-continue">Continue</button>
-	</div>
 	<select id="taskSelect" class="form-control"></select>
 	</div>
       </div>
@@ -87,6 +81,31 @@
               <rect x="4" y="4" width="8" height="8" />
             </svg>
           </button>
+        </div>
+      </div>
+
+      <!-- Messages (collapsible; opens by itself when a new message comes) -->
+      <div class="card mt-3" id="messages-card">
+        <div class="card-header dash-fold" data-toggle="collapse" data-target="#messages-body"
+             role="button" aria-expanded="true" aria-controls="messages-body">
+          <span>Messages <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
+          <span class="dash-chevron" aria-hidden="true"></span>
+        </div>
+        <div id="messages-body" class="collapse show">
+          <div class="card-body pb-1">
+            <div id="no-messages" class="text-muted small mb-2">No messages</div>
+            <!-- The task reached a pause point and waits for the user -->
+            <div id="pause-banner" class="alert alert-warning d-none" role="status">
+              <div class="font-weight-bold">The task is waiting</div>
+              <div id="pause-message" class="mb-2"></div>
+              <button class="btn btn-warning btn-small" id="pause-continue">Continue</button>
+            </div>
+            <!-- Text of the Message output; OK hides it -->
+            <div id="notice-banner" class="alert alert-info d-none" role="status">
+              <div id="notice-text" class="mb-2"></div>
+              <button class="btn btn-info btn-small" id="notice-ok">OK</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -156,10 +175,16 @@
         </div>
       </div>
 
-      <!-- Outputs -->
+      <!-- Outputs (collapsible) -->
       <div class="card mt-3">
-        <div class="card-header">Outputs</div>
-        <div id="outputs-dashboard"></div>
+        <div class="card-header dash-fold" data-toggle="collapse" data-target="#outputs-body"
+             role="button" aria-expanded="true" aria-controls="outputs-body">
+          <span>Outputs</span>
+          <span class="dash-chevron" aria-hidden="true"></span>
+        </div>
+        <div id="outputs-body" class="collapse show">
+          <div id="outputs-dashboard"></div>
+        </div>
       </div>
 
     </div>
@@ -243,6 +268,11 @@
             <small class="text-muted">Minimum 8 characters</small>
           </div>
 
+          <div class="small text-muted" id="ap-address-line" style="display:none">
+            Farm network address: <strong id="ap-address"></strong>
+            <span id="ap-moved-note" style="display:none">(moved, because your home network uses 192.168.4.x)</span>
+          </div>
+
         </div>
       </div>
 
@@ -282,6 +312,45 @@
               <div class="input-group-append">
                 <button class="btn btn-outline-secondary" type="button"
                         id="sta-pass-toggle" tabindex="-1">👁</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Where the farm is in the home network -->
+          <div id="home-status" class="alert alert-light border small" style="display:none"></div>
+
+          <!-- IP settings: automatic by default, manual for those who manage their router -->
+          <div class="mb-3">
+            <a href="#" class="small dash-fold collapsed d-inline-flex" data-toggle="collapse" data-target="#ip-settings"
+               role="button" aria-expanded="false" aria-controls="ip-settings" id="ip-settings-toggle">
+              <span class="mr-2">IP settings</span><span class="dash-chevron" aria-hidden="true"></span>
+            </a>
+            <div id="ip-settings" class="collapse">
+              <div class="pt-2">
+                <div class="custom-control custom-radio custom-control-inline">
+                  <input type="radio" id="ip-mode-auto" name="ip-mode" value="auto" class="custom-control-input" checked>
+                  <label class="custom-control-label" for="ip-mode-auto">Automatic</label>
+                </div>
+                <div class="custom-control custom-radio custom-control-inline">
+                  <input type="radio" id="ip-mode-manual" name="ip-mode" value="manual" class="custom-control-input">
+                  <label class="custom-control-label" for="ip-mode-manual">Manual</label>
+                </div>
+                <small class="text-muted d-block mt-1 mb-2" id="ip-mode-hint">
+                  The farm takes a free address .200–.249 in your network and keeps it.
+                </small>
+                <div class="ip-grid">
+                  <label for="ip-addr">Address</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-addr" inputmode="decimal" placeholder="192.168.1.210" autocomplete="off">
+                  <label for="ip-mask">Mask</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-mask" inputmode="decimal" placeholder="255.255.255.0" autocomplete="off">
+                  <label for="ip-gw">Gateway</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-gw" inputmode="decimal" placeholder="192.168.1.1" autocomplete="off">
+                  <label for="ip-dns1">DNS 1</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns1" inputmode="decimal" placeholder="router" autocomplete="off">
+                  <label for="ip-dns2">DNS 2</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns2" inputmode="decimal" placeholder="optional" autocomplete="off">
+                </div>
+                <small class="text-muted d-block mt-2" id="ip-reserve-hint" style="display:none"></small>
               </div>
             </div>
           </div>
@@ -390,16 +459,6 @@
         </div>
 
         <!-- CUSTOM repeat on/off times -->
-        <!-- ONCE only: pause the task here and show a message -->
-        <div id="batch-pause-group" class="form-group" style="display:none;">
-          <div class="custom-control custom-switch">
-            <input type="checkbox" class="custom-control-input" id="batch-pause">
-            <label class="custom-control-label" for="batch-pause">Pause the task here</label>
-          </div>
-          <small class="text-muted d-block mb-2">Running cycles go on; the task's day count waits until Continue.</small>
-          <input type="text" class="form-control" id="batch-message" maxlength="60"
-                 placeholder="Message, e.g. Remove the lid" autocomplete="off" style="display:none;">
-        </div>
 
         <div id="batch-custom-group" style="display:none;">
           <div class="form-group d-flex align-items-center mb-2">

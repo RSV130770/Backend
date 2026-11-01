@@ -632,6 +632,8 @@ function runDashboardWorkflow() {
 
 
 function initTaskControlUI() {
+  $("#notice-ok").off().on("click", confirmNotice);
+  initDashboardFolds();
   $("#pause-continue").off().on("click", () => {
     pauseMessage = "";
     requestTaskResume();          // the controller confirms the pause point
@@ -667,6 +669,7 @@ function updateTaskUI(status) {
   // Pause point banner
   $("#pause-banner").toggleClass("d-none", status !== "frozen");
   $("#pause-message").text(pauseMessage || "");
+  updateMessagesCard();
 
   // Existing logic...
   if (status === "not started" || status === "stopped") {
@@ -714,6 +717,7 @@ function buildDashboard() {
   container.innerHTML = "";
 
   outputsConfig.forEach(o => {
+    if (o.mode === "message") return;   // shown as a banner, not a card
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
 
     container.insertAdjacentHTML("beforeend", `
@@ -826,6 +830,57 @@ function followTaskStatus(s) {
   }
 }
 
+// Text of the Message output ("" when none). OK hides it on the controller.
+function showNotice(text) {
+  $("#notice-text").text(text);
+  $("#notice-banner").toggleClass("d-none", !text);
+  updateMessagesCard();
+}
+
+// Messages card: count in the header (seen when folded), "No messages",
+// and open the card by itself when a message comes that was not there yet
+let shownMessages = "";
+function updateMessagesCard() {
+  const texts = [];
+  if (!$("#pause-banner").hasClass("d-none")) texts.push("P:" + $("#pause-message").text());
+  if (!$("#notice-banner").hasClass("d-none")) texts.push("N:" + $("#notice-text").text());
+  $("#msg-count").text(texts.length).toggleClass("d-none", texts.length === 0);
+  $("#no-messages").toggleClass("d-none", texts.length > 0);
+  const key = texts.join("\n");
+  if (key && key !== shownMessages) $("#messages-body").collapse("show");
+  shownMessages = key;
+}
+
+// Folded cards stay folded when the page is opened again (this phone only)
+const FOLD_KEY = "dashFolded";
+function initDashboardFolds() {
+  let folded = [];
+  try { folded = JSON.parse(localStorage.getItem(FOLD_KEY) || "[]"); } catch (e) { folded = []; }
+  ["#messages-body", "#outputs-body"].forEach(id => {
+    const $body = $(id);
+    const $head = $(`[data-target="${id}"]`);
+    if (folded.includes(id)) {
+      $body.removeClass("show");
+      $head.addClass("collapsed").attr("aria-expanded", "false");
+    }
+    $body.off(".fold").on("shown.bs.collapse.fold hidden.bs.collapse.fold", function (e) {
+      if (e.target !== this) return;
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(FOLD_KEY) || "[]"); } catch (err) { list = []; }
+      list = list.filter(x => x !== id);
+      if (e.type === "hidden") list.push(id);
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify(list)); } catch (err) { /* private mode */ }
+    });
+  });
+}
+
+function confirmNotice() {
+  showNotice("");
+  if (OFFLINE_MODE) return;
+  $.ajax({ url: "/api/notice/ok", type: "POST" })
+    .fail(() => fetchState(true));      // still shown if OK did not arrive
+}
+
 function fetchState(force) {
   if (OFFLINE_MODE) {
     // Fake state for debugging
@@ -854,6 +909,7 @@ function fetchState(force) {
       renderDashboard(s);
       updateDashboardState(s);
       followTaskStatus(s);
+      showNotice(s.notice || "");
     })
     .fail(() => {
       console.warn("Failed to fetch /api/state");
@@ -1075,8 +1131,13 @@ function customOffsetSec(ev) {
 
 function createLeaf(ev, groupId) {
   const isPause = ev.repeat === 'freeze';
+  const isMsg = isMessageEvent(ev);
   const cfg = outputsConfig.find(c => c.id == ev.channelId);
-  const label = isPause ? `⏸ ${ev.message || 'Pause'}` : (cfg ? cfg.label : `Ch${ev.channelId}`);
+  const label = isPause ? `⏸ ${ev.message || 'Pause'}`
+              : isMsg ? (parseInt(ev.duty) > 0 ? `✉ ${ev.message || 'Message'}` : '✉ Message')
+              : (cfg ? cfg.label : `Ch${ev.channelId}`);
+  const dutyText = isPause ? 'WAIT' : isMsg ? (parseInt(ev.duty) > 0 ? 'SHOW' : 'HIDE') : leafDutyText(ev);
+  const noEdit = isPause || isMsg;     // edited in the group dialog
   const enabled = ev.enabled !== false;
 
   const $leaf = $(`
@@ -1084,9 +1145,9 @@ function createLeaf(ev, groupId) {
     <input type="checkbox" class="tree-check leaf-check" ${enabled ? 'checked' : ''}>
     <span class="tree-leaf-time${ev.repeat === 'custom' ? ' tree-leaf-cycle' : ''}" title="${ev.repeat === 'custom' ? 'on : off' : ''}">${leafTimeText(ev)}</span>
     <span class="tree-leaf-label">${escapeHtml(label)}</span>
-    <span class="tree-leaf-duty">${isPause ? 'WAIT' : leafDutyText(ev)}</span>
+    <span class="tree-leaf-duty">${dutyText}</span>
     <div class="tree-actions">
-      <button class="tree-edit-btn${isPause ? ' invisible' : ''}" title="Edit">✏</button>
+      <button class="tree-edit-btn${noEdit ? ' invisible' : ''}" title="Edit">✏</button>
       <button class="tree-remove-btn" title="Remove">×</button>
     </div>
   </div>
@@ -1153,6 +1214,16 @@ function groupRepeat(events) {
 // The pause point of a group, if it has one
 function groupPause(events) {
   return events.find(e => e.repeat === 'freeze') || null;
+}
+
+// The virtual Message output (mode "message"): its id, or null
+function isMessageCfg(cfg) { return !!cfg && cfg.mode === 'message'; }
+function messageChannelId() {
+  const cfg = Array.isArray(outputsConfig) ? outputsConfig.find(isMessageCfg) : null;
+  return cfg ? Number(cfg.id) : null;
+}
+function isMessageEvent(ev) {
+  return ev.repeat !== 'freeze' && messageChannelId() !== null && Number(ev.channelId) === messageChannelId();
 }
 
 // Text for user input placed into HTML
@@ -1519,14 +1590,11 @@ function openBatchModal($row, newGroupId) {
   const isNew = !$row;
   const allEvents = isNew ? [] : getNodeEvents($row);
   $('#batch-name').val(groupNameOf(allEvents));
-  // Pause point of the group (once groups only)
+  // Message tile: its text, and "wait" when the group is a pause point
   const pauseEv = groupPause(allEvents);
-  $('#batch-pause').prop('checked', !!pauseEv);
-  $('#batch-message').val(pauseEv ? (pauseEv.message || '') : '').toggle(!!pauseEv);
-  $('#batch-pause').off('change').on('change', function () {
-    $('#batch-message').toggle(this.checked);
-    if (this.checked) $('#batch-message').trigger('focus');
-  });
+  const msgEv = allEvents.find(ev => isMessageEvent(ev) && parseInt(ev.duty) > 0);
+  batchMsgText = pauseEv ? (pauseEv.message || '') : (msgEv ? (msgEv.message || '') : '');
+  batchMsgWait = !!pauseEv;
   // Channel events (without the pause point) drive the rest of the dialog
   const existingEvents = allEvents.filter(ev => ev.repeat !== 'freeze');
   if (existingEvents.length === 0 && pauseEv) existingEvents.push(Object.assign({}, pauseEv, { repeat: 'once' }));
@@ -1569,15 +1637,25 @@ function openBatchModal($row, newGroupId) {
 
   // Build channel list: the group's channels start in "In this group"
   batchMembers = new Set(allEvents.filter(ev => ev.repeat !== 'freeze').map(ev => Number(ev.channelId)));
+  if (pauseEv && messageChannelId() !== null) batchMembers.add(messageChannelId());
   buildBatchChannelList(existingEvents, repeat);
 
   // Bind repeat change
   $('#batch-repeat').off('change').on('change', function () {
     const newRepeat = $(this).val();
+    // Keep the levels already set for the channels in the group
+    const levels = {};
+    $('.batch-duty-input').each(function () { levels[$(this).data('channel')] = $(this).val(); });
+    $('.batch-duty-toggle').each(function () { levels[$(this).data('channel')] = this.checked; });
     $('#batch-time-on').val('');
     $('#batch-time-off').val('');
     updateBatchTimeFields(newRepeat);
     buildBatchChannelList(existingEvents, newRepeat);
+    Object.keys(levels).forEach(ch => {
+      const v = levels[ch];
+      if (typeof v === 'boolean') $(`#batch-toggle-${ch}`).prop('checked', v).next('label').text(v ? 'On' : 'Off');
+      else $(`.batch-duty-input[data-channel="${ch}"]`).val(v);
+    });
   });
 
   // Bind save
@@ -1606,13 +1684,14 @@ function updateBatchTimeFields(repeat) {
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').hide();
   }
-  // Only a once group can pause the task
-  $('#batch-pause-group').toggle(repeat === 'once');
 }
 
 // Channels of the group being edited (ids). Set when the dialog opens and
 // kept when the repeat type changes; tiles move channels in and out.
 let batchMembers = new Set();
+// Message tile settings, kept while the repeat type changes
+let batchMsgText = '';
+let batchMsgWait = false;
 
 function buildBatchChannelList(existingEvents, repeat) {
   const $list = $('#batch-channel-list');
@@ -1649,6 +1728,24 @@ function buildBatchChannelList(existingEvents, repeat) {
 
     const isNoRamp = cfg.mode === 'no_ramp';
 
+    if (isMessageCfg(cfg)) {
+      // The text, and (once groups) wait for Continue instead of OK
+      $settings.append(`
+        <div class="batch-channel-row batch-msg-row" data-channel="${cfg.id}">
+          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-msg-fields">
+            <input type="text" class="form-control" id="batch-msg-text" maxlength="60"
+                   placeholder="Text, e.g. Remove the lid" autocomplete="off"
+                   value="${escapeHtml(batchMsgText)}">
+            <div class="custom-control custom-switch mt-1 batch-msg-wait-row"${repeat === 'once' ? '' : ' style="display:none;"'}>
+              <input type="checkbox" class="custom-control-input" id="batch-msg-wait"${batchMsgWait ? ' checked' : ''}>
+              <label class="custom-control-label" for="batch-msg-wait">Pause the task until Continue</label>
+            </div>
+          </div>
+        </div>`);
+      return;
+    }
+
     let dutyInput = '';
     if (isNoRamp) {
       const checked = duty >= 50 ? 'checked' : '';
@@ -1674,6 +1771,9 @@ function buildBatchChannelList(existingEvents, repeat) {
       </div>
     `);
   });
+
+  $list.find('#batch-msg-text').on('input', function () { batchMsgText = this.value; });
+  $list.find('#batch-msg-wait').on('change', function () { batchMsgWait = this.checked; });
 
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
@@ -1812,12 +1912,15 @@ function saveBatchItem() {
   $off.toggleClass('is-invalid', offMissing);
   if (onMissing || offMissing) return;
 
-  // A pause point (once groups only) with its message
-  const withPause = (repeat === 'once') && $('#batch-pause').is(':checked');
-  const pauseMessage = $('#batch-message').val().trim();
+  // Message tile: shown with OK, or (once groups) a pause point with Continue
+  const msgId = messageChannelId();
+  const withMessage = msgId !== null && batchMembers.has(msgId);
+  const msgText = withMessage ? ($('#batch-msg-text').val() || '').trim() : '';
+  const withPause = withMessage && repeat === 'once' && $('#batch-msg-wait').is(':checked');
+  const pauseMessage = msgText;
 
-  // A group needs at least one channel, or a pause point
-  if (batchMembers.size === 0 && !withPause) {
+  // A group needs at least one channel
+  if (batchMembers.size === 0) {
     $('#batch-channel-error').show();
     return;
   }
@@ -1847,6 +1950,7 @@ function saveBatchItem() {
     // group would switch the pump off at its start time.
     const prev = existingEvents.find(ev => ev.channelId == cfg.id);
     if (!batchMembers.has(Number(cfg.id))) return;
+    if (isMessageCfg(cfg) && withPause) return;   // the freeze event below
 
     const base = {
       groupId: currentBatchGroupId,
@@ -1860,6 +1964,21 @@ function saveBatchItem() {
       fall: prev ? (prev.fall || 0) : (cfg.fallDefault || 0),
       enabled: true
     };
+
+    if (isMessageCfg(cfg)) {
+      // Shown from the group's On time (until OK or its Off time)
+      const msg = { ...base, rise: 0, fall: 0, message: msgText };
+      if (isDaily) {
+        events.push({ ...msg, time: timeOn, duty: 100, on: 0, off: 0 });
+        events.push({ ...base, rise: 0, fall: 0, time: timeOff, duty: 0, on: 0, off: 0 });
+      } else if (isCustom) {
+        const orig = existingEvents.find(ev => ev.channelId == cfg.id);
+        events.push({ ...msg, time: orig ? orig.time : '--:--', duty: 100, on: onTotal, off: offTotal });
+      } else {
+        events.push({ ...msg, time: timeOn, duty: 100, on: 0, off: 0 });
+      }
+      return;
+    }
 
     if (isDaily) {
       // ON event
@@ -1884,7 +2003,7 @@ function saveBatchItem() {
     events.push({
       groupId: currentBatchGroupId,
       groupName: $('#batch-name').val().trim(),
-      channelId: 0,                 // ignored by the controller
+      channelId: msgId,             // ignored by the controller
       time: timeOn,
       afterDays: parseInt($('#batch-after-days').val()) || 0,
       expireAfterDays: 0,
@@ -2249,6 +2368,7 @@ function buildPlayground() {
   container.empty();
 
   outputsConfig.forEach(o => {
+    if (o.mode === "message") return;   // virtual output, nothing to drive
 
     const hasParams = o.mode !== "no_ramp"; // Debug NO_RAMP has no collapse
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
@@ -2509,6 +2629,96 @@ function initSettings() {
 
   /* save button */
   document.getElementById("settings-save-btn").addEventListener("click", saveSettings);
+
+  /* IP settings: automatic / manual */
+  $("input[name=ip-mode]").on("change", () => { ipTouched = true; _applyIpMode(); });
+  $(".ip-field").on("input", () => { ipTouched = true; });
+}
+
+/* Home network status, also followed while the farm is connecting */
+let homeInfo = null;        // "home" object from the controller
+let ipTouched = false;      // the user changed the IP settings
+let homeTimer = null;
+
+function _ipModeManual() { return $("#ip-mode-manual").is(":checked"); }
+
+function _applyIpMode() {
+  const manual = _ipModeManual();
+  $(".ip-field").prop("disabled", !manual);
+  $("#ip-mode-hint").text(manual
+    ? "Type the address yourself. It must be free and in your home network."
+    : "The farm takes a free address .200–.249 in your network and keeps it.");
+  if (manual && homeInfo) {
+    // start from the saved manual values, else from what is in use now
+    const m = homeInfo.manual || {};
+    const put = (id, a, b) => { if (!$(id).val()) $(id).val(a || b || ""); };
+    put("#ip-addr", m.ip, homeInfo.ip);
+    put("#ip-mask", m.mask, homeInfo.mask);
+    put("#ip-gw", m.gw, homeInfo.gw);
+    put("#ip-dns1", m.dns1, homeInfo.dns1);
+    put("#ip-dns2", m.dns2, homeInfo.dns2 !== "0.0.0.0" ? homeInfo.dns2 : "");
+  }
+}
+
+function _showHome(h) {
+  homeInfo = h || null;
+  const box = $("#home-status");
+  if (h && h.apIp) {
+    $("#ap-address").text(h.apIp);
+    $("#ap-moved-note").toggle(!!h.apMoved);
+    $("#ap-address-line").show();
+  }
+  if (!h || h.state === "off") { box.hide(); _followHome(false); return; }
+
+  const net = _esc(h.ssid || "home network");
+  let html = "";
+  if (h.state === "connected" && h.ip) {
+    const url = "http://" + h.ip + "/";
+    html = `Connected to <strong>${net}</strong>.<br>Farm at home: ` +
+           `<a href="${url}" target="_blank" rel="noopener" class="font-weight-bold" id="home-link">${_esc(url)}</a>` +
+           `<span class="text-muted d-block mt-1">Open it from a phone or PC on ${net}` +
+           `${h.hostname ? " · name in the router: " + _esc(h.hostname) : ""}</span>`;
+    if (h.kind === "dhcp") html += `<span class="d-block mt-1">The router's address is used: it may change.</span>`;
+  } else if (h.state === "retry") {
+    const min = h.retryIn ? Math.max(1, Math.round(h.retryIn / 60)) : 0;
+    html = `Not connected to <strong>${net}</strong>.` + (min ? ` Next try in ${min} min.` : "");
+  } else {
+    html = `<span class="spinner-border spinner-border-sm mr-1" role="status"></span>` +
+           `Connecting to <strong>${net}</strong>…`;
+  }
+  if (h.note) html += `<span class="d-block mt-1 text-warning-dark">${_esc(h.note)}</span>`;
+  box.html(html).show();
+
+  // IP settings reflect the controller unless the user is editing them
+  if (!ipTouched) {
+    const manual = h.mode === "manual";
+    $("#ip-mode-manual").prop("checked", manual);
+    $("#ip-mode-auto").prop("checked", !manual);
+    const src = manual ? (h.manual || {}) : h;
+    $("#ip-addr").val(src.ip || "");
+    $("#ip-mask").val(src.mask || "");
+    $("#ip-gw").val(src.gw || "");
+    $("#ip-dns1").val(src.dns1 || "");
+    $("#ip-dns2").val(src.dns2 && src.dns2 !== "0.0.0.0" ? src.dns2 : "");
+    _applyIpMode();
+  }
+  const ip = h.ip || "";
+  $("#ip-reserve-hint").text(ip && h.hostname
+    ? `To be sure the address stays free, reserve ${ip} for ${h.hostname} in your router.` : "")
+    .toggle(!!(ip && h.hostname));
+
+  _followHome(["connecting", "checking", "switching"].includes(h.state));
+}
+
+// Ask again every 3 s while the farm is joining the network
+function _followHome(on) {
+  if (!on) { clearTimeout(homeTimer); homeTimer = null; return; }
+  if (homeTimer) return;
+  homeTimer = setTimeout(() => {
+    homeTimer = null;
+    if (!$("#settings").is(":visible")) return;
+    $.getJSON("/wifi/status").done(d => _showHome(d.home)).fail(() => _followHome(true));
+  }, 3000);
 }
 
 /* run (called every time page becomes active) */
@@ -2533,6 +2743,8 @@ function loadSettingsData() {
       /* passwords are never returned - leave blank */
       document.getElementById("sta-ssid").value = d.sta_ssid || "";
       _showStaSaved(!!d.sta_saved, !!d.sta_connected);
+      ipTouched = false;
+      _showHome(d.home);
     })
     .fail(() => _settingsStatus("Could not load settings.", "danger"));
 }
@@ -2616,6 +2828,28 @@ function saveSettings() {
   if (staSsid) payload.sta_ssid = staSsid;
   if (staPass) payload.sta_pass = staPass;
 
+  /* IP settings: sent when changed (the controller checks them too) */
+  if (ipTouched) {
+    if (_ipModeManual()) {
+      const v = id => $(id).val().trim();
+      const ipRe = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+      const ok = s => ipRe.test(s) && s.split(".").every(n => +n <= 255);
+      const fields = [["#ip-addr", "Address"], ["#ip-mask", "Mask"], ["#ip-gw", "Gateway"]];
+      for (const [id, name] of fields) {
+        if (!ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
+          return _settingsStatus(`${name}: four numbers, like ${$(id).attr("placeholder")}.`, "warning"); }
+      }
+      for (const [id, name] of [["#ip-dns1", "DNS 1"], ["#ip-dns2", "DNS 2"]]) {
+        if (v(id) && !ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
+          return _settingsStatus(`${name}: four numbers, or leave it empty.`, "warning"); }
+      }
+      payload.ip = { mode: "manual", ip: v("#ip-addr"), mask: v("#ip-mask"), gw: v("#ip-gw"),
+                     dns1: v("#ip-dns1"), dns2: v("#ip-dns2") };
+    } else {
+      payload.ip = { mode: "auto" };
+    }
+  }
+
   const btn = document.getElementById("settings-save-btn");
   btn.disabled = true;
   btn.textContent = "Saving…";
@@ -2639,7 +2873,8 @@ function saveSettings() {
   .done(resp => {
     if (resp && resp.restart) {
       _settingsStatus(
-        "Saved! Device is restarting. Reconnect to the AP with the new credentials.",
+        "Saved! Device is restarting. Reconnect to the AP with the new credentials. " +
+        "When the farm has joined your home network, its address there is shown on this page.",
         "success"
       );
       btn.textContent = "Restarting…";
