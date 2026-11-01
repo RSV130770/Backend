@@ -324,6 +324,12 @@ table {
   text-align: right;
 }
 
+/* Message tile: text and the pause switch take the row's width */
+.batch-msg-row { flex-wrap: wrap; }
+.batch-msg-row .batch-channel-label { flex: 0 0 100%; margin-bottom: 4px; }
+.batch-msg-fields { flex: 1 1 100%; min-width: 0; }
+#notice-banner #notice-text { white-space: pre-wrap; word-break: break-word; }
+
   /* Time column */
   #schedule-list td.time,
   #schedule-list th.time {
@@ -629,3 +635,18 @@ html, body {
   background: #f8f9fa;
   text-align: center;
 }
+
+/* Dashboard: foldable card headers */
+.dash-fold { display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+.dash-chevron { width: 10px; height: 10px; margin-right: 4px;
+  border-right: 2px solid #6c757d; border-bottom: 2px solid #6c757d;
+  transform: rotate(45deg); transition: transform .2s; }
+.dash-fold.collapsed .dash-chevron { transform: rotate(-45deg); }
+#messages-card .alert:last-child { margin-bottom: .75rem; }
+
+/* Settings: IP fields in two columns */
+.ip-grid { display: grid; grid-template-columns: 76px 1fr; gap: 6px 8px; align-items: center; }
+.ip-grid label { margin: 0; font-size: .875rem; }
+.text-warning-dark { color: #8a6d00; }
+#home-status a { word-break: break-all; }
