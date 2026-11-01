@@ -146,11 +146,37 @@ void updateNow() {
   NOW.tm_isdst = 0;
 
   NOW_EPOCH = mktime(&NOW);
-  if (TASK_STATUS == T_PAUSE || TASK_STATUS == T_FROZEN) {
-    if (freezeEntryEpoch == 0)
-      freezeEntryEpoch = NOW_EPOCH;  // stamp once on first update after state change
-  } else {
-    freezeEntryEpoch = 0;  // clear when running normally
+}
+
+// -----------------------------
+// Time spent stopped (service pause or a stage-end wait)
+// -----------------------------
+// One rule for both: only whole days count. The task start moves forward
+// by every full day spent stopped, as if those days were added to the
+// current stage; daily events keep their clock times. A stop shorter than
+// a day shifts nothing. "from" is when the stop began.
+static void shiftStartByWholeDays(uint32_t from, const char* what) {
+  if (from == 0 || from > NOW_EPOCH || from < schedulerStartEpoch) {
+    Serial.printf("%s: no valid start time (%lu), task days not moved\n",
+                  what, (unsigned long)from);
+    return;
+  }
+  uint32_t days = (NOW_EPOCH - from) / 86400u;
+  if (days > 0) {
+    schedulerStartEpoch += days * 86400u;
+    time_t st = (time_t)schedulerStartEpoch;
+    tm startTm = *localtime(&st);
+    PutStartTimetoRtc(startTm);
+  }
+  Serial.printf("%s lasted %lu s: task days moved by %lu\n", what,
+                (unsigned long)(NOW_EPOCH - from), (unsigned long)days);
+}
+
+// Physical outputs off; virtual ones (Message) keep their state
+static void physicalOutputsOff() {
+  for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
+    if (OUT[ch].mode == MODE_MESSAGE) continue;
+    OUT[ch].reset();
   }
 }
 
@@ -191,7 +217,9 @@ uint32_t effectiveNow=0;
 static void retrospectiveApply() {
   updateNow();
 
-  uint32_t effectiveNow = NOW_EPOCH - (uint32_t)FROZEN_DAYS * 86400u;
+  // Time spent stopped is added to the task start (see
+  // shiftStartByWholeDays), so the schedule runs on the real clock
+  uint32_t effectiveNow = NOW_EPOCH;
 
   MachineEvent* bestPast[OUTPUT_COUNT]     = {};
   uint32_t      bestPastTime[OUTPUT_COUNT] = {};
@@ -287,7 +315,7 @@ void schedulerTick() {
   }
   lastTickEpoch = NOW_EPOCH;
 
-  uint32_t effectiveNow = NOW_EPOCH - (uint32_t)FROZEN_DAYS * 86400u;
+  uint32_t effectiveNow = NOW_EPOCH;
 
   // Per-channel: track best candidate
   MachineEvent* bestPast[OUTPUT_COUNT]     = {};
@@ -303,6 +331,7 @@ void schedulerTick() {
     activeFreeze = dueFreeze;
     if (TASK_STATUS != T_FROZEN) {
       TASK_STATUS = T_FROZEN;
+      setPauseStart(dueFreeze->activationEpoch);   // fallback for Continue
       saveTaskData();
       Serial.printf("Task waits at pause %u: %s\n", dueFreeze->seq, dueFreeze->message.c_str());
     }
@@ -363,11 +392,21 @@ void schedulerStart() {
 }
 
 void schedulerStartAt(uint32_t startEpoch, bool recovering) {
+  // FROZEN_DAYS is retired: days paused now move the task start instead.
+  // A value left by the old firmware is folded into the start once.
+  if (recovering && FROZEN_DAYS > 0 && FROZEN_DAYS < 255) {
+    startEpoch += (uint32_t)FROZEN_DAYS * 86400u;
+    Serial.printf("Old FROZEN_DAYS=%u moved into the task start\n", FROZEN_DAYS);
+    FROZEN_DAYS = 0;
+    schedulerStartEpoch = startEpoch;
+    time_t st = (time_t)startEpoch;
+    tm startTm = *localtime(&st);
+    PutStartTimetoRtc(startTm);           // also saves FROZEN_DAYS = 0
+  }
+  FROZEN_DAYS = 0;
+  if (!recovering) setPauseStart(0);    // a new run has no pause behind it
+  saveTaskData();                       // a stale FROZEN_DAYS must not survive
   schedulerStartEpoch = startEpoch;
-  // Reset before the first apply: a value left from the previous preset
-  // would shift its schedule
-  if (!recovering) FROZEN_DAYS = 0;
-  freezeEntryEpoch = 0;
   computeAllActivationTimes();
   retrospectiveApply();
   schedulerTicker.detach();
@@ -378,15 +417,33 @@ void schedulerStartAt(uint32_t startEpoch, bool recovering) {
 // -----------------------------
 // Pause
 // -----------------------------
+// Service pause: the schedule stops and every physical output goes off
+// (Playground may still drive them by hand). The pause start is kept in RTC
+// memory, so the days paused are counted right after a reboot too.
 void schedulerPause() {
   if (TASK_STATUS != T_START) return;
   schedulerTicker.detach();
-  TASK_STATUS = T_PAUSE;
   updateNow();
-  for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
-    OUT[ch].freeze(NOW_EPOCH);
+  TASK_STATUS = T_PAUSE;
+  setPauseStart(NOW_EPOCH);
+  saveTaskData();
+  physicalOutputsOff();
+  Serial.println("Scheduler paused, outputs off");
+}
+
+// After a reboot during a service pause: the preset was rebuilt and its
+// state applied; go back to the paused state with the outputs off.
+void schedulerRestorePause() {
+  schedulerTicker.detach();
+  TASK_STATUS = T_PAUSE;
+  uint32_t ps = getPauseStart();
+  if (ps == 0 || ps > NOW_EPOCH || ps < schedulerStartEpoch) {
+    // Unknown (e.g. first boot after the update): count from now
+    setPauseStart(NOW_EPOCH);
   }
-  Serial.println("Scheduler paused");
+  saveTaskData();
+  physicalOutputsOff();
+  Serial.println("Scheduler restored to paused, outputs off");
 }
 
 // -----------------------------
@@ -397,52 +454,32 @@ void schedulerResume() {
   const bool wasWaiting = (TASK_STATUS == T_FROZEN);   // at a pause point
   // 1) Refresh time
   updateNow();
-  //  1.1) time spent waiting at a pause point / paused by hand
+  //  1.1) time spent stopped: whole days move the task start. A wait at a
+  //  pause point is measured from the pause point itself, a service pause
+  //  from its start in RTC memory, so a reboot does not shorten either.
   if (wasWaiting) {
-    // While waiting the task's day count stood still: move its start forward
-    // by every full day spent waiting, so "day N" events keep their place
-    // after the pause point. Events whose time passed during a shorter wait
-    // run right away. Measured from the pause point itself, so a reboot
-    // while waiting does not shorten the wait.
-    uint32_t from = activeFreeze ? activeFreeze->activationEpoch : freezeEntryEpoch;
-    if (from != 0 && NOW_EPOCH > from) {
-      uint32_t days = (NOW_EPOCH - from) / 86400u;
-      if (days > 0) {
-        schedulerStartEpoch += days * 86400u;
-        time_t st = (time_t)schedulerStartEpoch;
-        tm startTm = *localtime(&st);
-        PutStartTimetoRtc(startTm);
-      }
-      Serial.printf("Waited %lu s: task days moved by %lu\n",
-                    (unsigned long)(NOW_EPOCH - from), (unsigned long)days);
-    }
-  } else if (freezeEntryEpoch != 0) {
-    uint32_t elapsed = NOW_EPOCH - freezeEntryEpoch;
-    if (elapsed >= 86400u) {
-      uint8_t days = (uint8_t)(elapsed / 86400u);
-      FROZEN_DAYS += days;  // accumulates across multiple pauses
-    }
+    uint32_t from = activeFreeze ? activeFreeze->activationEpoch : getPauseStart();
+    shiftStartByWholeDays(from, "Wait at pause point");
+  } else {
+    shiftStartByWholeDays(getPauseStart(), "Service pause");
   }
+  setPauseStart(0);
   if (wasWaiting) {
     // This pause point is confirmed; a reboot must not ask again
     FREEZE_DONE = activeFreeze ? activeFreeze->seq + 1 : FREEZE_DONE + 1;
     activeFreeze = nullptr;
   }
-  freezeEntryEpoch = 0;
   TASK_STATUS = T_START;
   saveTaskData();
   // 2) Recompute activationEpoch for all events (in case time changed)
 
   computeAllActivationTimes();
-  // 3) Re-apply schedule state as of NOW (overwrites Playground changes)
+  // 3) Re-apply schedule state as of NOW. After a service pause start from
+  // all off, so a channel Playground switched on but no event drives does
+  // not stay on. (A wait at a pause point kept the outputs running.)
+  if (!wasWaiting) physicalOutputsOff();
   retrospectiveApply();
-  // 4) Unfreeze outputs timeline (only a manual pause froze them)
-  if (!wasWaiting) {
-    for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
-      OUT[ch].resume(NOW_EPOCH);
-    }
-  }
-  // 5) Restart periodic tick
+  // 4) Restart periodic tick
   schedulerTicker.detach();
   schedulerTicker.attach_ms(1000, schedulerTickWrapper);
   Serial.println("Scheduler resumed");
@@ -456,13 +493,12 @@ void schedulerStop() {
   schedulerTicker.detach();
   TASK_STATUS  = T_STOP;
   FROZEN_DAYS  = 0;
-  freezeEntryEpoch = 0;
 
   for (int ch = 0; ch < OUTPUT_COUNT; ch++)
     OUT[ch].reset();
 
   deleteEvents();
-  ClearStartTimeInRtc();  // zeros PRESET_ID, FROZEN_DAYS, START_* in RTC RAM
+  ClearStartTimeInRtc();  // zeros START_*, FROZEN_DAYS and the pause bytes
 
   Serial.println("Scheduler stopped");
 }

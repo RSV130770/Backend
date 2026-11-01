@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <MD_DS1307.h>
 #include <time.h>
-#define  RTCDATACOUNT 10 
+#define  RTCDATACOUNT 16 
 #define  PRESET_ID rtcData[0]
 #define  TASK_STATUS rtcData[1]
 #define  START_YEAR rtcData[2]
@@ -11,8 +11,17 @@
 #define  START_DAY rtcData[4]
 #define  START_HOUR rtcData[5]
 #define  START_MIN rtcData[6]
-#define  FROZEN_DAYS rtcData[7]
+#define  FROZEN_DAYS rtcData[7]   // retired: read once after an update, then kept 0
 #define  FREEZE_DONE rtcData[8] 
+// rtcData[9] is free
+// rtcData[10..13]: start of the current pause (epoch, little endian),
+// see getPauseStart() / setPauseStart()
+#define  PAUSE_SOURCE rtcData[14]  // who paused: PAUSE_SRC_* (used from step 3)
+// rtcData[15] is free
+
+#define PAUSE_SRC_NONE       0
+#define PAUSE_SRC_PLAYGROUND 1
+#define PAUSE_SRC_DASHBOARD  2
 
 #define T_STOP 0
 #define T_START 1
@@ -43,6 +52,8 @@ void PutStartTimetoRtc(tm t);
 void ClearStartTimeInRtc();
 void saveTaskData();
 void loadTaskData();
+uint32_t getPauseStart();          // 0 = no pause recorded
+void setPauseStart(uint32_t epoch);
 
 void writeTime(JsonObject &o, uint8_t hour, uint8_t minute);
 String printHHMM(uint8_t hour, uint8_t minute);

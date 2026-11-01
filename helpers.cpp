@@ -12,6 +12,21 @@ void loadTaskData() {
   RTC.readRAM(0x0A, rtcData, RTCDATACOUNT);
 }
 
+// Start of the current pause or stage-end wait, kept in RTC memory so a
+// reboot during a pause still counts the days from the real start.
+// Bytes 10..13, little endian. Saved by the caller with saveTaskData().
+uint32_t getPauseStart() {
+  return (uint32_t)rtcData[10] | ((uint32_t)rtcData[11] << 8) |
+         ((uint32_t)rtcData[12] << 16) | ((uint32_t)rtcData[13] << 24);
+}
+
+void setPauseStart(uint32_t epoch) {
+  rtcData[10] = epoch & 0xFF;
+  rtcData[11] = (epoch >> 8) & 0xFF;
+  rtcData[12] = (epoch >> 16) & 0xFF;
+  rtcData[13] = (epoch >> 24) & 0xFF;
+}
+
 
 uint32_t convertToMs(uint16_t value, const String &unit) {
   if (unit == "ms")  return value;
@@ -176,6 +191,8 @@ void ClearStartTimeInRtc() {
   START_HOUR = 0;
   START_MIN = 0;
   FROZEN_DAYS = 0;
+  setPauseStart(0);
+  PAUSE_SOURCE = PAUSE_SRC_NONE;
   saveTaskData();
 }
 

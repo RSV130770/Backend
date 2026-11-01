@@ -9,6 +9,7 @@
 #include <time.h>
 void schedulerInit();
 void schedulerPause();
+void schedulerRestorePause();   // after a reboot during a service pause
 void schedulerResume();
 void schedulerStop();
 void schedulerTick();
@@ -17,8 +18,8 @@ void schedulerStart();
 void schedulerForgetEvents();   // call when EVENTS are deleted
 const char* schedulerNotice();  // text of the Message output, or nullptr
 void schedulerNoticeOk();       // the user confirmed the message (OK)
-// Start with a given start time; recovering = true keeps FROZEN_DAYS
-// (used after a reboot or when the running preset was edited)
+// Start with a given start time; recovering = true after a reboot or when
+// the running preset was edited (folds an old FROZEN_DAYS into the start)
 void schedulerStartAt(uint32_t startEpoch, bool recovering);
 void buildEventsFromPreset(const JsonObject& preset);
 extern uint32_t schedulerStartEpoch;

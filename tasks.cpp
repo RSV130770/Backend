@@ -315,10 +315,7 @@ static bool continuePreset(uint8_t id, uint8_t status) {
     TASK_STATUS = status;
     Serial.println("continuePreset: still waiting at a pause point");
   } else if (status == T_PAUSE) {
-    schedulerTicker.detach();
-    TASK_STATUS = status;
-    Serial.printf("continuePreset: restored to %s\n",
-                  taskStatusToString().c_str());
+    schedulerRestorePause();     // ticker stopped, physical outputs off
   }
   return true;
 }
