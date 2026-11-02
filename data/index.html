@@ -52,13 +52,27 @@
 
     <div class="card-body">
 
-      <!-- ROW 1: Task selector -->
+      <!-- ROW 1: Task and stage tiles (tap a tile to choose) -->
       <div class="row mb-3">
-	<div class="col-12 p-0">
-	<label for="taskSelect" id="taskSelectLabel">Select Task</label>
-    	<label id="taskStatusLabel" class="text-muted d-block"></label>
-	<select id="taskSelect" class="form-control"></select>
-	</div>
+        <div class="col-6 pl-0 pr-1">
+          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task">
+            <div class="dash-tile-label">Task</div>
+            <div class="dash-tile-value" id="taskSelectLabel">Loading...</div>
+            <div class="dash-tile-sub" id="taskStatusLabel"></div>
+          </div>
+        </div>
+        <div class="col-6 pr-0 pl-1">
+          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage">
+            <div class="dash-tile-label" id="stageTileLabel">Stage</div>
+            <div class="dash-tile-value" id="stageTileName">--</div>
+            <div class="dash-tile-sub" id="stageTileDays"></div>
+            <div class="progress dash-tile-bar">
+              <div id="stageTileBar" class="progress-bar bg-success" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+        <!-- The task list as data (kept hidden; the task tile opens the picker) -->
+        <div class="d-none"><select id="taskSelect"></select></div>
       </div>
 
       <!-- ROW 2: Start time + buttons -->
@@ -726,6 +740,27 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="exit-stay-btn">Stay</button>
         <button class="btn btn-danger" id="exit-leave-btn">Leave</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Dashboard picker: the task list or the stage list, with a confirm step -->
+<div id="pickModal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="pick-title">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pick-title">Choose</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="pick-list" class="list-group list-group-flush"></div>
+        <div id="pick-confirm" class="p-3 d-none">
+          <div id="pick-question" class="mb-3"></div>
+          <div class="text-right">
+            <button type="button" class="btn btn-secondary btn-small mr-2" id="pick-cancel">Back</button>
+            <button type="button" class="btn btn-success btn-small" id="pick-ok">Yes</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -218,6 +218,9 @@ function requestTaskStart() {
   }
 
   const localStart = localISO();
+  // A stage chosen on the stage tile: start the task there (once)
+  const stageId = startAtStage;
+  startAtStage = null;
 
   if (OFFLINE_MODE) {
     taskStatus = "running";
@@ -227,25 +230,31 @@ function requestTaskStart() {
     return;
   }
 
+  const body = {
+    id: Number($("#taskSelect").val()),
+    startTime: localStart   // sent to sync device RTC
+  };
+  if (stageId !== null) body.stageId = stageId;
+
   $.ajax({
     url: "/preset/start",
     type: "POST",
     contentType: "application/json",
-    data: JSON.stringify({
-      id: Number($("#taskSelect").val()),
-      startTime: localStart   // sent to sync device RTC
-    }),
+    data: JSON.stringify(body),
     success: resp => {
       taskStatus = resp.status || "running";
       taskStartTime = resp.startTime || localStart;  // prefer device time, fallback to local
       taskIndex = Number($("#taskSelect").val());
       renderDashboard(resp);
-      updateTaskUI(taskStatus);  // now shows "Running since: <device time>"
-	  updateScheduleHeader();
+      updateTaskUI(taskStatus);  // now shows "Running since <device time>"
+      updateScheduleHeader();
+      loadTaskContent(taskIndex);  // the task may have changed (task tile)
+      fetchState(true);            // stage tile at once
     },
     error: xhr => console.warn("/preset/start failed:", xhr.status)
   });
 }
+
 
 function requestTaskPause() {
   if (OFFLINE_MODE) {
@@ -477,6 +486,8 @@ function loadTaskContent(index) {
     return;
   }
   $.getJSON(`/preset/content?id=${index}`, data => {
+    presetStages = Array.isArray(data.stages) ? data.stages : [];
+    if (!isTaskActive()) { stageList = presetStages; renderStageTile(); }
     showPresetSchedule(data);
   });
 }
@@ -639,75 +650,47 @@ function initTaskControlUI() {
     requestTaskResume();          // the controller confirms the pause point
   });
   $("#taskStart").off().on("click", requestTaskStart);
-  $("#taskPause").off().on("click", requestTaskPause);
+  $("#taskPause").off().on("click", () =>
+  taskStatus === "paused" ? requestTaskResume() : requestTaskPause());
+  initTiles();
   $("#taskStop").off().on("click", requestTaskStop);
   updateTaskUI(taskStatus);
 }
 
+const PAUSE_ICON  = "M5 3h2v10H5V3zm4 0h2v10H9V3z";
+const RESUME_ICON = "M4 3.3v9.4L12 8 4 3.3z";
+
 function updateTaskUI(status) {
-
-  const task = taskList.find(t => t.index === taskIndex);
-  const name = task ? task.name : "Unknown";
-
-  // Always show task name
-  $("#taskSelectLabel").text("Task: " + name);
-
-  // NEW: status line
-  if (status === "running") {
-    $("#taskStatusLabel").text("Running since: " + taskStartTime);
+  // Task tile: the name; until the list arrives the label shows
+  // "Loading..." or the retry link put there by loadPresetList()
+  if (taskList.length) {
+    const task = taskList.find(t => t.index === taskIndex);
+    $("#taskSelectLabel").text(task ? task.name : "Unknown");
   }
-  else if (status === "paused") {
-    $("#taskStatusLabel").text("Paused at: " + taskStartTime);
-  }
-  else if (status === "frozen") {
-    $("#taskStatusLabel").text("");   // the banner below shows the message
-  }
-  else {
-    $("#taskStatusLabel").text(""); // hide when not running/paused
-  }
+  const since = taskStartTime ? " since " + tileTime(taskStartTime) : "";
+  const line = {
+    running:  "Running" + since,
+    paused:   "Paused",
+    frozen:   "Waiting",
+    finished: "Finished"
+  }[status] || "Stopped";
+  $("#taskStatusLabel").text(line);
+  $("#taskTile").attr("data-status", status);
 
-  // Pause point banner
+  // Stage-end banner
   $("#pause-banner").toggleClass("d-none", status !== "frozen");
   $("#pause-message").text(pauseMessage || "");
   updateMessagesCard();
 
-  // Existing logic...
-  if (status === "not started" || status === "stopped") {
+  // Buttons. Pause becomes Resume while paused.
+  const active = status === "running" || status === "paused" || status === "frozen";
+  $("#taskStart").prop("disabled", active);
+  $("#taskPause").prop("disabled", status !== "running" && status !== "paused")
+    .attr("title", status === "paused" ? "Resume" : "Pause")
+    .find("path").attr("d", status === "paused" ? RESUME_ICON : PAUSE_ICON);
+  $("#taskStop").prop("disabled", !active);
 
-    $("#taskSelect").removeClass("d-none").prop("disabled", false);
-
-    $("#taskSelectLabel").removeClass("d-none");
-
-    $("#taskStart").prop("disabled", false);
-    $("#taskPause").prop("disabled", true);
-    $("#taskStop").prop("disabled", true);
-
-    return;
-  }
-
-  if (status === "running" || status === "paused" || status === "frozen") {
-
-    $("#taskSelect").addClass("d-none");
-
-    if (status === "frozen") {
-      // Continue is in the banner; Stop still works
-      $("#taskStart").prop("disabled", true);
-      $("#taskPause").prop("disabled", true);
-      $("#taskStop").prop("disabled", false);
-    }
-
-    if (status === "running") {
-      $("#taskStart").prop("disabled", true);
-      $("#taskPause").prop("disabled", false);
-      $("#taskStop").prop("disabled", false);
-    }
-
-    if (status === "paused") {
-      $("#taskStart").prop("disabled", false);
-      $("#taskPause").prop("disabled", true);
-      $("#taskStop").prop("disabled", false);
-    }
-  }
+  renderStageTile();
 }
 
 
@@ -909,6 +892,7 @@ function fetchState(force) {
       renderDashboard(s);
       updateDashboardState(s);
       followTaskStatus(s);
+      updateStageState(s);
       showNotice(s.notice || "");
     })
     .fail(() => {
@@ -969,6 +953,194 @@ function loadOutputsConfig() {
         reject(err);
       });
   });
+}
+/* ============================================================
+   DASHBOARD TILES: current task and current stage
+   ============================================================ */
+let stageState = null;    // /api/state "stage" while a task is active
+let stageList = [];       // stages shown in the stage picker
+let presetStages = [];    // stages of the selected task (/preset/content)
+let startAtStage = null;  // stage id for the next /preset/start
+
+function isTaskActive() {
+  return taskStatus === "running" || taskStatus === "paused" || taskStatus === "frozen";
+}
+
+// "2026-11-01 14:37" -> "01.11 14:37"
+function tileTime(s) {
+  const m = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(s || "");
+  return m ? `${m[3]}.${m[2]} ${m[4]}:${m[5]}` : (s || "");
+}
+
+// Stage length as "7 d", "21 d 12 h" or "open-ended"
+function stageLengthText(st) {
+  const d = Number(st.days) || 0, h = Number(st.hours) || 0;
+  if (!d && !h) return "open-ended";
+  return (d ? d + " d" : "") + (d && h ? " " : "") + (h ? h + " h" : "");
+}
+
+// Called with every /api/state answer
+function updateStageState(s) {
+  if (s.taskStatus === "finished" && taskStatus !== "finished") {
+    taskStatus = "finished";
+    updateTaskUI(taskStatus);
+  }
+  const active = ["running", "paused", "frozen"].includes(s.taskStatus);
+  stageState = active && s.stage ? s.stage : null;
+  stageList = active ? (Array.isArray(s.stages) ? s.stages : []) : presetStages;
+  renderStageTile();
+}
+
+function renderStageTile() {
+  const st = stageState;
+  let label = "Stage", name = "Single stage", days = "", pct = 0;
+
+  if (st) {
+    label = `Stage ${st.index + 1}/${st.count}`;
+    name = st.name || "";
+    const day = Math.floor((st.elapsedMin || 0) / 1440) + 1;
+    const total = st.lengthMin ? Math.ceil(st.lengthMin / 1440) : 0;
+    days = total ? `day ${day} of ${total}` : `day ${day}`;
+    pct = st.lengthMin ? Math.min(100, 100 * st.elapsedMin / st.lengthMin) : 0;
+  } else if (taskStatus === "finished" && stageList.length) {
+    label = `Stage ${stageList.length}/${stageList.length}`;
+    name = stageList[stageList.length - 1].name;
+    days = "done";
+    pct = 100;
+  } else if (stageList.length) {
+    label = `Stages: ${stageList.length}`;
+    name = stageList[0].name;
+    days = "starts with this one";
+  }
+
+  $("#stageTileLabel").text(label);
+  $("#stageTileName").text(name);
+  $("#stageTileDays").text(days);
+  $("#stageTileBar").css("width", pct + "%");
+  $("#stageTile").toggleClass("disabled", stageList.length === 0);
+}
+
+/* ---------- picker dialog ---------- */
+let pickAction = null;
+
+// items: [{ id, label, sub, current }]; onPick(item) runs on a tap
+function openPicker(title, items, onPick) {
+  $("#pick-title").text(title);
+  const $list = $("#pick-list").empty().removeClass("d-none");
+  items.forEach(it => {
+    const $b = $('<button type="button" class="list-group-item list-group-item-action"></button>');
+    $b.append($('<div></div>').text(it.label));
+    if (it.sub) $b.append($('<div class="small text-muted"></div>').text(it.sub));
+    if (it.current) $b.addClass("current");
+    $b.on("click", () => onPick(it));
+    $list.append($b);
+  });
+  $("#pick-confirm").addClass("d-none");
+  $("#pickModal").modal("show");
+}
+
+// Second step in the same dialog: a question with Back / Yes
+function askPicker(question, okText, action) {
+  $("#pick-question").text(question);
+  $("#pick-ok").text(okText);
+  pickAction = action;
+  $("#pick-list").addClass("d-none");
+  $("#pick-confirm").removeClass("d-none");
+}
+
+function closePicker() {
+  $("#pickModal").modal("hide");
+}
+
+/* ---------- task tile ---------- */
+function openTaskPicker() {
+  if (!taskList.length) return;
+  const items = taskList.map(t => ({
+    id: t.index,
+    label: t.name,
+    current: t.index === taskIndex
+  }));
+  openPicker("Task", items, it => {
+    if (it.id === taskIndex) { closePicker(); return; }
+    if (!isTaskActive()) {
+      // Nothing runs: just select it (the box handler tells the controller)
+      closePicker();
+      $("#taskSelect").val(it.id).trigger("change");
+      return;
+    }
+    const cur = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
+    askPicker(`Stop ${cur} and start ${it.label} now?`, "Start", () => {
+      $("#taskSelect").val(it.id);
+      requestTaskStart();
+    });
+  });
+}
+
+/* ---------- stage tile ---------- */
+function openStagePicker() {
+  if (!stageList.length) return;
+  const curId = stageState ? stageState.id : null;
+  const items = stageList.map((st, i) => ({
+    id: st.id,
+    label: `${i + 1}. ${st.name}`,
+    sub: (st.days !== undefined || st.hours !== undefined) ? stageLengthText(st) : "",
+    current: st.id === curId,
+    name: st.name
+  }));
+  openPicker("Stage", items, it => {
+    if (it.id === curId) { closePicker(); return; }
+    if (isTaskActive()) {
+      askPicker(`Switch to ${it.name} now?`, "Switch", () => requestSetStage(it.id));
+      return;
+    }
+    const task = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
+    askPicker(`Start ${task} at ${it.name} now?`, "Start", () => {
+      startAtStage = it.id;
+      requestTaskStart();
+    });
+  });
+}
+
+function requestSetStage(stageId) {
+  if (OFFLINE_MODE) return;
+  $.ajax({
+    url: "/preset/stage",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ stageId: stageId })
+  })
+    .done(() => fetchState(true))
+    .fail(xhr => console.warn("/preset/stage failed:", xhr.status, xhr.responseText));
+}
+
+// Bound once from initTaskControlUI()
+function initTiles() {
+  const open = (sel, fn) => {
+    $(sel).off(".tile")
+      .on("click.tile", e => {
+        // the "Retry" link of a failed task list stays a link
+        if ($(e.target).closest("a").length) return;
+        if (!$(sel).hasClass("disabled")) fn();
+      })
+      .on("keydown.tile", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $(sel).trigger("click"); }
+      });
+  };
+  open("#taskTile", openTaskPicker);
+  open("#stageTile", openStagePicker);
+
+  $("#pick-cancel").off().on("click", () => {
+    pickAction = null;
+    $("#pick-confirm").addClass("d-none");
+    $("#pick-list").removeClass("d-none");
+  });
+  $("#pick-ok").off().on("click", () => {
+    const action = pickAction;
+    pickAction = null;
+    closePicker();
+    if (action) action();
+  });
+  renderStageTile();
 }
 let currentTaskName = null;
 let lastMode = null;
