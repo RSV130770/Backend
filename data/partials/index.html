@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Ecoslider Premifarm</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="bg-light">
+<!-- NAVBAR (Bootstrap 4) -->
+<nav class="navbar navbar-expand-md navbar-light bg-light fixed-top">
+  <!-- Hamburger button -->
+  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#mainNav">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+
+  <!-- Collapsible content -->
+  <div class="collapse navbar-collapse" id="mainNav">
+    <ul class="navbar-nav mx-auto" id="mainNavList">
+      <li class="nav-item">
+        <a class="nav-link nav-page-link active" href="#" data-page="dashboard">Dashboard</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link nav-page-link" href="#" data-page="schedule">Schedule</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link nav-page-link" href="#" data-page="playground">Playground</a>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Datetime stays visible -->
+  <div class="navbar-text ml-3" id="datetime">--:--</div>
+</nav>
+
+<div class="container-fluid mb-0">
+  <div id="container"><!-- Open container /-->
+
+  
+<section id="dashboard" class="page">
+
+  <div class="card mb-3">
+    <div class="card-header bg-info text-white">
+      <h5 class="mb-0">Dashboard</h5>
+    </div>
+
+    <div class="card-body">
+
+      <!-- ROW 1: Task selector -->
+      <div class="row mb-3">
+	<div class="col-12 p-0">
+	<label for="taskSelect" id="taskSelectLabel">Select Task</label>
+    	<label id="taskStatusLabel" class="text-muted d-block"></label>
+	<select id="taskSelect" class="form-control"></select>
+	</div>
+      </div>
+
+      <!-- ROW 2: Start time + buttons -->
+      <div class="row mb-3 align-items-end">
+        <div class="col-6 text-right p-0">
+          <button class="btn btn-success btn-small mr-2" id="taskStart">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 3.3v9.4L12 8 4 3.3z" />
+            </svg>
+          </button>
+
+          <button class="btn btn-warning btn-small mr-2" id="taskPause">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M5 3h2v10H5V3zm4 0h2v10H9V3z" />
+            </svg>
+          </button>
+
+          <button class="btn btn-danger btn-small" id="taskStop">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="4" y="4" width="8" height="8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Inputs -->
+      <div class="card mt-3">
+        <div class="card-header">Inputs</div>
+        <div class="card-body">
+          <div class="row">
+
+            <!-- Water Temp -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#54a4fa">
+                  <img src="temp-b.svg">
+                </div>
+                <div class="value-big text-center" id="w_temp">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Water Temp</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="w_temp_bar" class="progress-bar bg-info" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Air Temp -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="temp-b.svg">
+                </div>
+                <div class="value-big text-center" id="a_temp">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Air Temp</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="a_temp_bar" class="progress-bar bg-danger" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Air Humidity -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="humidity.svg">
+                </div>
+                <div class="value-big text-center" id="a_hum">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Air Humidity</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="a_hum_bar" class="progress-bar bg-success" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Level -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="level.svg">
+                </div>
+                <div class="value-big text-center" id="level">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Level</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="level_bar" class="progress-bar bg-secondary" style="width:0%"></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="card mt-3">
+        <div class="card-header">Outputs</div>
+        <div id="outputs-dashboard"></div>
+      </div>
+
+    </div>
+  </div>
+
+</section><section id="schedule" class="page">
+
+  <div class="card mb-3">
+
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">Schedule List</h5>
+    </div>
+
+    <div class="card-body pl-2 pr-2">
+
+      <table class="table table-sm mb-0 tight-table">
+        <thead>
+          <tr>
+            <th class="s-t-time">Time</th>
+            <th class="s-t-cnl">Channel</th>
+            <th class="s-t-how">Repeat</th>
+            <th class="s-t-val">State</th>
+            <th class="s-t-cancel"></th>
+          </tr>
+        </thead>
+        <tbody id="schedule-list"></tbody>
+      </table>
+
+    </div>
+
+    <div class="card-footer d-flex justify-content-end gap-2">
+      <button class="btn btn-success" id="add-btn">Add</button>
+      <button class="btn btn-primary" id="apply-btn">Apply</button>
+      <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
+    </div>
+
+  </div>
+
+</section>
+<section id="playground" class="page">
+
+  <div class="card mb-3">
+
+    <div class="card-header bg-warning text-dark">
+      <h5 class="mb-0">Playground</h5>
+    </div>
+
+    <div class="card-body" id="playground-container">
+      <!-- Cards will be injected here -->
+    </div>
+
+  </div>
+
+</section>
+
+
+</div> <!-- close container/-->
+</div> <!-- close container-fluid /-->
+<!-- FIXED FOOTER NAVIGATION -->
+<footer class="footer-nav bg-light border-top">
+  <div class="d-flex justify-content-between align-items-center px-4 py-2">
+
+    <button id="footer-prev" class="btn btn-outline-secondary btn-sm" tabindex="-1"
+>
+      ◀
+    </button>
+
+  <!-- Navigation dots -->
+  <div class="nav-dots text-center pb-2">
+    <span class="dot active"></span>
+    <span class="dot"></span>
+    <span class="dot"></span>
+  </div>
+
+    <button id="footer-next" class="btn btn-outline-secondary btn-sm" tabindex="-1"
+>
+      ▶
+    </button>
+
+  </div>
+
+</footer>
+
+<!-- Schedule Modal -->
+<div id="editModal" class="modal fade" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Schedule Item</h5>
+        <button type="button" class="close" data-dismiss="modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+
+
+
+<!-- CHANNEL FIRST -->
+<div class="form-group">
+  <label for="edit-channel">Channel</label>
+  <select class="form-control" id="edit-channel"></select>
+</div>
+
+<!-- OUTPUT-SPECIFIC BLOCK (mini-collapses) -->
+<div id="output-settings">
+
+<!-- DUTY COLLAPSE (parent always visible; inner groups toggle) -->
+<div id="collapse-duty" class="mb-2">
+  <!-- Numeric duty input (kept for analog/softstart modes) -->
+  <div class="form-group collapse show" id="edit-duty-numeric-group">
+    <label for="edit-duty">Duty Cycle (%)</label>
+    <input type="number" class="form-control" id="edit-duty" min="0" max="100" step="1">
+  </div>
+
+  <!-- No-ramp toggler (on/off) -->
+  <div class="form-group collapse" id="edit-duty-toggle-group">
+    <label for="edit-duty-toggle">State</label>
+    <div class="custom-control custom-switch">
+      <input type="checkbox" class="custom-control-input" id="edit-duty-toggle" aria-describedby="edit-duty-toggle-label">
+      <label class="custom-control-label" id="edit-duty-toggle-label" for="edit-duty-toggle">Off</label>
+    </div>
+    <small class="form-text text-muted">Use this toggle for outputs that only support ON/OFF (no ramp).</small>
+  </div>
+</div>
+
+  <!-- RISE COLLAPSE -->
+  <div id="collapse-rise" class="collapse">
+    <div class="form-group">
+      <label for="edit-rise">Rise Time (ms)</label>
+      <input type="number" class="form-control" id="edit-rise" min="0" step="1">
+    </div>
+  </div>
+
+  <!-- FALL COLLAPSE -->
+  <div id="collapse-fall" class="collapse">
+    <div class="form-group">
+      <label for="edit-fall">Fall Time (ms)</label>
+      <input type="number" class="form-control" id="edit-fall" min="0" step="1">
+    </div>
+  </div>
+
+</div>
+
+<!-- COMMON MACHINEEVENT FIELDS -->
+<div class="form-group">
+  <label>Trigger Time</label>
+  <div class="d-flex flex-nowrap align-items-center">
+    <input type="time" class="form-control mr-2" id="edit-time" style="max-width:140px;">
+    <div id="after-days-group" class="ml-2">
+      <div class="d-flex flex-nowrap align-items-center">
+        <span class="mx-1">After</span>
+        <input type="number" class="form-control mx-1" id="edit-after-days" min="0" step="1" value="0" style="max-width:80px;">
+        <span class="mx-1">Days</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REPEAT -->
+<div class="form-group">
+  <label for="edit-repeat">Repeat</label>
+  <select class="form-control" id="edit-repeat">
+    <option value="daily">Every Day</option>
+    <option value="custom">Custom</option>
+    <option value="once">Once</option>
+  </select>
+</div>
+
+<!-- EVENT-SPECIFIC BLOCK (custom loop only) -->
+<div id="custom-repeat-group" class="collapse">
+
+  <!-- ON row -->
+  <div class="form-group d-flex align-items-center mb-2">
+    <label class="mr-3 mb-0" style="width:40px;">On</label>
+
+    <div class="d-flex align-items-center mr-3">
+      <input type="number" class="form-control" id="edit-on-min" min="0" max="59" value="0" style="width:70px;">
+      <span class="ml-1">min</span>
+    </div>
+
+    <div class="d-flex align-items-center">
+      <input type="number" class="form-control" id="edit-on-sec" min="0" max="59" value="0" style="width:70px;">
+      <span class="ml-1">sec</span>
+    </div>
+  </div>
+
+  <!-- OFF row -->
+  <div class="form-group d-flex align-items-center">
+    <label class="mr-3 mb-0" style="width:40px;">Off</label>
+
+    <div class="d-flex align-items-center mr-3">
+      <input type="number" class="form-control" id="edit-off-min" min="0" max="59" value="0" style="width:70px;">
+      <span class="ml-1">min</span>
+    </div>
+
+    <div class="d-flex align-items-center">
+      <input type="number" class="form-control" id="edit-off-sec" min="0" max="59" value="0" style="width:70px;">
+      <span class="ml-1">sec</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ENABLED -->
+<div class="form-group">
+  <div class="custom-control custom-switch">
+    <input type="checkbox" class="custom-control-input" id="edit-enabled">
+    <label class="custom-control-label" for="edit-enabled">Enabled</label>
+  </div>
+</div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button id="cancel-btn" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button id="save-edit" class="btn btn-primary">Save</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!--End Scedule modal -->
+
+<script src="/jquery.js"></script>
+<script src="/popper.js"></script>
+<script src="/bootstrap.js"></script>
+<script src="/app.js"></script>
+</body>
+
+</html>

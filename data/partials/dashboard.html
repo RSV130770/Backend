@@ -1,0 +1,162 @@
+<section id="dashboard" class="page">
+
+  <div class="card mb-3">
+    <div class="card-header bg-info text-white">
+      <h5 class="mb-0">Dashboard</h5>
+    </div>
+
+    <div class="card-body">
+
+      <!-- ROW 1: Task and stage tiles (tap a tile to choose) -->
+      <div class="row mb-3">
+        <div class="col-6 pl-0 pr-1">
+          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task">
+            <div class="dash-tile-label">Task</div>
+            <div class="dash-tile-value" id="taskSelectLabel">Loading...</div>
+            <div class="dash-tile-sub" id="taskStatusLabel"></div>
+          </div>
+        </div>
+        <div class="col-6 pr-0 pl-1">
+          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage">
+            <div class="dash-tile-label" id="stageTileLabel">Stage</div>
+            <div class="dash-tile-value" id="stageTileName">--</div>
+            <div class="dash-tile-sub" id="stageTileDays"></div>
+            <div class="progress dash-tile-bar">
+              <div id="stageTileBar" class="progress-bar bg-success" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+        <!-- The task list as data (kept hidden; the task tile opens the picker) -->
+        <div class="d-none"><select id="taskSelect"></select></div>
+      </div>
+
+      <!-- ROW 2: Start time + buttons -->
+      <div class="row mb-3 align-items-end">
+        <div class="col-6 text-right p-0">
+          <button class="btn btn-success btn-small mr-2" id="taskStart">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 3.3v9.4L12 8 4 3.3z" />
+            </svg>
+          </button>
+
+          <button class="btn btn-warning btn-small mr-2" id="taskPause">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M5 3h2v10H5V3zm4 0h2v10H9V3z" />
+            </svg>
+          </button>
+
+          <button class="btn btn-danger btn-small" id="taskStop">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="4" y="4" width="8" height="8" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Messages (collapsible; opens by itself when a new message comes) -->
+      <div class="card mt-3" id="messages-card">
+        <div class="card-header dash-fold" data-toggle="collapse" data-target="#messages-body"
+             role="button" aria-expanded="true" aria-controls="messages-body">
+          <span>Messages <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
+          <span class="dash-chevron" aria-hidden="true"></span>
+        </div>
+        <div id="messages-body" class="collapse show">
+          <div class="card-body pb-1">
+            <div id="no-messages" class="text-muted small mb-2">No messages</div>
+            <!-- The task reached a pause point and waits for the user -->
+            <div id="pause-banner" class="alert alert-warning d-none" role="status">
+              <div class="font-weight-bold">The task is waiting</div>
+              <div id="pause-message" class="mb-2"></div>
+              <button class="btn btn-warning btn-small" id="pause-continue">Continue</button>
+            </div>
+            <!-- Text of the Message output; OK hides it -->
+            <div id="notice-banner" class="alert alert-info d-none" role="status">
+              <div id="notice-text" class="mb-2"></div>
+              <button class="btn btn-info btn-small" id="notice-ok">OK</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inputs -->
+      <div class="card mt-3">
+        <div class="card-header">Inputs</div>
+        <div class="card-body">
+          <div class="row">
+
+            <!-- Water Temp -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#54a4fa">
+                  <img src="temp-b.svg">
+                </div>
+                <div class="value-big text-center" id="w_temp">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Water Temp</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="w_temp_bar" class="progress-bar bg-info" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Air Temp -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="temp-b.svg">
+                </div>
+                <div class="value-big text-center" id="a_temp">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Air Temp</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="a_temp_bar" class="progress-bar bg-danger" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Air Humidity -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="humidity.svg">
+                </div>
+                <div class="value-big text-center" id="a_hum">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Air Humidity</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="a_hum_bar" class="progress-bar bg-success" style="width:0%"></div>
+              </div>
+            </div>
+
+            <!-- Level -->
+            <div class="col-6 mb-3 pr-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="pic" style="background-color:#9ccafb">
+                  <img src="level.svg">
+                </div>
+                <div class="value-big text-center" id="level">--</div>
+              </div>
+              <div class="text-center mt-1"><strong>Level</strong></div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div id="level_bar" class="progress-bar bg-secondary" style="width:0%"></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Outputs (collapsible) -->
+      <div class="card mt-3">
+        <div class="card-header dash-fold" data-toggle="collapse" data-target="#outputs-body"
+             role="button" aria-expanded="true" aria-controls="outputs-body">
+          <span>Outputs</span>
+          <span class="dash-chevron" aria-hidden="true"></span>
+        </div>
+        <div id="outputs-body" class="collapse show">
+          <div id="outputs-dashboard"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</section>

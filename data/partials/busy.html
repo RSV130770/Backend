@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PremiFarm Status</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    .status-card {
+      max-width: 400px;
+      margin: auto;
+      margin-top: 10vh;
+    }
+    .timeOut-value {
+      font-size: 2.5rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="card status-card shadow">
+    <div class="card-header text-center bg-primary text-white">
+      PremiFarm Status
+    </div>
+    <div class="card-body text-center">
+      <!-- Busy spinner -->
+      <div id="busyIndicator" class="mb-3">
+        <div class="spinner-border text-primary" role="status">
+          <span class="sr-only">Busy...</span>
+        </div>
+        <p class="mt-2">Device is busy</p>
+      </div>
+
+      <!-- Countdown value -->
+      <div>
+        <p>Remains:</p>
+        <div id="timeOut" class="timeOut-value text-danger">--</div>
+      </div>
+    </div>
+  </div>
+<form id="sessionForm" method="POST" action="/resume">
+  <input type="hidden" name="key" value="<%= sessionKey %>">
+  <input type="hidden" name="encodedPass" value="<%= encodedPass %>">
+</form>
+
+
+  <!-- jQuery -->
+  <script src="/jquery.js"></script>
+  <!-- Bootstrap JS -->
+  <script src="/bootstrap.js"></script>
+
+  <script>
+
+function poll() {
+  $.ajax({
+    url: "/status",
+    method: "GET",
+    dataType: "json",
+    timeout: 1000,
+    success: function(res) {
+      // res = { busy:true/false, timeOut:NN, isConnected:true/false }
+      const val = parseInt(res.timeOut, 10);
+      document.getElementById("timeOut").textContent =
+        isNaN(val) ? "--" : val;
+
+      // When busy and timeout reaches zero → redirect with params
+      if (res.busy && val === 0) {
+        const key = document.getElementById("sessionKey").value;
+        const pass = document.getElementById("encodedPass").value;
+        // Redirect to /quar with query parameters
+        window.location.href = "/quar?key=" + encodeURIComponent(key) +
+                               "&pass=" + encodeURIComponent(pass);
+      }
+    },
+    error: function() {
+      console.log("poll failed");
+    }
+  });
+}
+setInterval(poll, 1000);
+

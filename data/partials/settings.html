@@ -1,0 +1,144 @@
+<section id="settings" class="page">
+
+  <div class="card mb-3">
+
+    <div class="card-header bg-secondary text-white">
+      <h5 class="mb-0">Settings</h5>
+    </div>
+
+    <div class="card-body">
+
+      <!-- AP SECTION -->
+      <div class="card mb-3">
+        <div class="card-header">
+          <strong>Access Point (AP)</strong>
+          <small class="text-muted d-block">Device hotspot — MiniFarm-XXXXXX</small>
+        </div>
+        <div class="card-body">
+
+          <div class="form-group">
+            <label for="ap-ssid">Network Name (SSID)</label>
+            <input type="text" class="form-control" id="ap-ssid"
+                   maxlength="32" placeholder="MiniFarm-XXXXXX">
+          </div>
+
+          <div class="form-group">
+            <label for="ap-pass">Password (WPA2)</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="ap-pass"
+                     autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
+                     maxlength="64" placeholder="Leave blank to keep current">
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        id="ap-pass-toggle" tabindex="-1">👁</button>
+              </div>
+            </div>
+            <small class="text-muted">Minimum 8 characters</small>
+          </div>
+
+          <div class="small text-muted" id="ap-address-line" style="display:none">
+            Farm network address: <strong id="ap-address"></strong>
+            <span id="ap-moved-note" style="display:none">(moved, because your home network uses 192.168.4.x)</span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- STA SECTION -->
+      <div class="card mb-3">
+        <div class="card-header">
+          <strong>Home Network (STA)</strong>
+          <small class="text-muted d-block">Connect to existing Wi-Fi router</small>
+        </div>
+        <div class="card-body">
+
+          <div class="form-group">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label for="sta-ssid" class="mb-0">Network Name (SSID)</label>
+              <span id="sta-saved-badge" class="badge badge-success" style="display:none!important">Saved</span>
+            </div>
+            <div class="input-group">
+              <input type="text" class="form-control" id="sta-ssid"
+                     maxlength="32" placeholder="Home network SSID">
+              <div class="input-group-append">
+                <button class="btn btn-outline-info btn-sm" type="button" id="wifi-scan-btn">Scan</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="wifi-scan-results" style="display:none" class="mb-3">
+            <label>Found networks:</label>
+            <div id="wifi-scan-list" class="list-group list-group-flush" style="max-height:180px;overflow-y:auto"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="sta-pass">Password</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="sta-pass"
+                     autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
+                     maxlength="64" placeholder="Leave blank to keep current">
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        id="sta-pass-toggle" tabindex="-1">👁</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Where the farm is in the home network -->
+          <div id="home-status" class="alert alert-light border small" style="display:none"></div>
+
+          <!-- IP settings: automatic by default, manual for those who manage their router -->
+          <div class="mb-3">
+            <a href="#" class="small dash-fold collapsed d-inline-flex" data-toggle="collapse" data-target="#ip-settings"
+               role="button" aria-expanded="false" aria-controls="ip-settings" id="ip-settings-toggle">
+              <span class="mr-2">IP settings</span><span class="dash-chevron" aria-hidden="true"></span>
+            </a>
+            <div id="ip-settings" class="collapse">
+              <div class="pt-2">
+                <div class="custom-control custom-radio custom-control-inline">
+                  <input type="radio" id="ip-mode-auto" name="ip-mode" value="auto" class="custom-control-input" checked>
+                  <label class="custom-control-label" for="ip-mode-auto">Automatic</label>
+                </div>
+                <div class="custom-control custom-radio custom-control-inline">
+                  <input type="radio" id="ip-mode-manual" name="ip-mode" value="manual" class="custom-control-input">
+                  <label class="custom-control-label" for="ip-mode-manual">Manual</label>
+                </div>
+                <small class="text-muted d-block mt-1 mb-2" id="ip-mode-hint">
+                  The farm takes a free address .200–.249 in your network and keeps it.
+                </small>
+                <div class="ip-grid">
+                  <label for="ip-addr">Address</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-addr" inputmode="decimal" placeholder="192.168.1.210" autocomplete="off">
+                  <label for="ip-mask">Mask</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-mask" inputmode="decimal" placeholder="255.255.255.0" autocomplete="off">
+                  <label for="ip-gw">Gateway</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-gw" inputmode="decimal" placeholder="192.168.1.1" autocomplete="off">
+                  <label for="ip-dns1">DNS 1</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns1" inputmode="decimal" placeholder="router" autocomplete="off">
+                  <label for="ip-dns2">DNS 2</label>
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns2" inputmode="decimal" placeholder="optional" autocomplete="off">
+                </div>
+                <small class="text-muted d-block mt-2" id="ip-reserve-hint" style="display:none"></small>
+              </div>
+            </div>
+          </div>
+
+          <div id="sta-disconnect-row" style="display:none">
+            <button class="btn btn-outline-danger btn-sm" id="sta-disconnect-btn">
+              Disconnect from home network
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- STATUS -->
+      <div id="settings-status" class="alert" style="display:none"></div>
+
+      <!-- SAVE -->
+      <button class="btn btn-primary btn-block" id="settings-save-btn">Save &amp; Restart</button>
+
+    </div>
+  </div>
+
+</section>

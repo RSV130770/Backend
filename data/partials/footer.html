@@ -1,0 +1,385 @@
+</div> <!-- close container/-->
+</div> <!-- close container-fluid /-->
+<!-- FIXED FOOTER NAVIGATION -->
+<footer class="footer-nav bg-light border-top">
+  <div class="d-flex justify-content-between align-items-center px-4 py-2">
+
+    <button id="footer-prev" class="btn btn-outline-secondary btn-sm" tabindex="-1">
+      ◀
+    </button>
+
+    <!-- Navigation dots -->
+    <div class="nav-dots text-center pb-2">
+      <span class="dot active"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+
+    <button id="footer-next" class="btn btn-outline-secondary btn-sm" tabindex="-1">
+      ▶
+    </button>
+
+  </div>
+
+</footer>
+
+<!-- Batch Editor Modal -->
+<div id="batchModal" class="modal fade" tabindex="-1" data-backdrop="static" data-keyboard="false">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Batch</h5>
+        <button type="button" class="close" data-dismiss="modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- GROUP NAME (shown in the schedule list instead of channel names) -->
+        <div class="form-group">
+          <label for="batch-name">Name</label>
+          <input type="text" class="form-control" id="batch-name" maxlength="24"
+                 placeholder="e.g. Lights (empty: channel names)"
+                 autocomplete="off" autocapitalize="sentences" spellcheck="false">
+        </div>
+
+        <!-- REPEAT TYPE -->
+        <div class="form-group">
+          <label for="batch-repeat">Repeat</label>
+          <select class="form-control" id="batch-repeat">
+            <option value="daily">Every Day</option>
+            <option value="custom">Custom</option>
+            <option value="once">Once</option>
+          </select>
+        </div>
+        <!-- DELAY + DURATION ROW -->
+        <div class="form-group">
+          <div class="d-flex">
+
+            <div class="mr-3">
+              <label>Delay, days</label>
+              <input type="number" class="form-control" id="batch-after-days" min="0" max="255" value="0"
+                style="width:90px;">
+            </div>
+
+            <div>
+              <label>Duration, days</label>
+              <input type="number" class="form-control" id="batch-expire" min="0" max="255" value="0"
+                style="width:90px;">
+            </div>
+
+          </div>
+          <small class="text-muted">0 = no delay / never expires</small>
+        </div>
+        <!-- SHARED TIME — daily shows two times, others show one -->
+        <div class="form-group" id="batch-time-on-group">
+          <label for="batch-time-on" id="batch-time-on-label">Time On</label>
+          <input type="time" class="form-control" id="batch-time-on" style="max-width:140px;">
+        </div>
+
+        <div class="form-group" id="batch-time-off-group" style="display:none;">
+          <label for="batch-time-off" id="batch-time-off-label">Time Off</label>
+          <input type="time" class="form-control" id="batch-time-off" style="max-width:140px;">
+        </div>
+
+        <!-- CUSTOM repeat on/off times -->
+
+        <div id="batch-custom-group" style="display:none;">
+          <div class="form-group d-flex align-items-center mb-2">
+            <label class="mr-3 mb-0" style="width:40px;">On</label>
+            <input type="number" class="form-control mr-1" id="batch-on-min" min="0" max="59" value="0"
+              style="width:70px;">
+            <span class="mr-3">min</span>
+            <input type="number" class="form-control mr-1" id="batch-on-sec" min="0" max="59" value="0"
+              style="width:70px;">
+            <span>sec</span>
+          </div>
+          <div class="form-group d-flex align-items-center">
+            <label class="mr-3 mb-0" style="width:40px;">Off</label>
+            <input type="number" class="form-control mr-1" id="batch-off-min" min="0" max="59" value="0"
+              style="width:70px;">
+            <span class="mr-3">min</span>
+            <input type="number" class="form-control mr-1" id="batch-off-sec" min="0" max="59" value="0"
+              style="width:70px;">
+            <span>sec</span>
+          </div>
+        </div>
+
+        <hr>
+
+        <!-- CHANNEL LIST -->
+        <div id="batch-channel-list">
+          <!-- Populated dynamically -->
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="batch-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Schedule Modal -->
+<div id="editModal" class="modal fade" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Schedule Item</h5>
+        <button type="button" class="close" data-dismiss="modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+
+
+
+        <!-- CHANNEL FIRST -->
+        <div class="form-group">
+          <label for="edit-channel">Channel</label>
+          <select class="form-control" id="edit-channel"></select>
+        </div>
+
+        <!-- OUTPUT-SPECIFIC BLOCK (mini-collapses) -->
+        <div id="output-settings">
+
+          <!-- DUTY COLLAPSE (parent always visible; inner groups toggle) -->
+          <div id="collapse-duty" class="mb-2">
+            <!-- Numeric duty input (kept for analog/softstart modes) -->
+            <div class="form-group collapse show" id="edit-duty-numeric-group">
+              <label for="edit-duty">Duty Cycle (%)</label>
+              <input type="number" class="form-control" id="edit-duty" min="0" max="100" step="1">
+            </div>
+
+            <!-- No-ramp toggler (on/off) -->
+            <div class="form-group collapse" id="edit-duty-toggle-group">
+              <label for="edit-duty-toggle">State</label>
+              <div class="custom-control custom-switch">
+                <input type="checkbox" class="custom-control-input" id="edit-duty-toggle"
+                  aria-describedby="edit-duty-toggle-label">
+                <label class="custom-control-label" id="edit-duty-toggle-label" for="edit-duty-toggle">Off</label>
+              </div>
+              <small class="form-text text-muted">Use this toggle for outputs that only support ON/OFF (no
+                ramp).</small>
+            </div>
+          </div>
+
+          <!-- RISE COLLAPSE -->
+          <div id="collapse-rise" class="collapse">
+            <div class="form-group">
+              <label for="edit-rise">Rise Time</label>
+              <div class="d-flex">
+                <input type="number" class="form-control" id="edit-rise" min="0" step="0.1" style="max-width:120px;">
+                <select id="edit-rise-unit" class="form-control ml-2" style="max-width:100px;">
+                  <option value="ms">ms</option>
+                  <option value="s">s</option>
+                  <option value="m">min</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- FALL COLLAPSE -->
+          <div id="collapse-fall" class="collapse">
+            <div class="form-group">
+              <label for="edit-fall">Fall Time</label>
+              <div class="d-flex">
+                <input type="number" class="form-control" id="edit-fall" min="0" step="0.1" style="max-width:120px;">
+                <select id="edit-fall-unit" class="form-control ml-2" style="max-width:100px;">
+                  <option value="ms">ms</option>
+                  <option value="s">s</option>
+                  <option value="m">min</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- COMMON MACHINEEVENT FIELDS -->
+        <div class="form-group">
+          <label>Trigger Time</label>
+          <div class="d-flex flex-nowrap align-items-center">
+            <input type="time" class="form-control mr-2" id="edit-time" style="max-width:140px;">
+            <div id="after-days-group" class="ml-2">
+              <div class="d-flex flex-nowrap align-items-center">
+                <span class="mx-1">After</span>
+                <input type="number" class="form-control mx-1" id="edit-after-days" min="0" step="1" value="0"
+                  style="max-width:80px;">
+                <span class="mx-1">Days</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom cycle only: start offset after the task starts -->
+        <div class="form-group" id="edit-offset-group" style="display:none;">
+          <label for="edit-offset-h">Start offset after the task starts</label>
+          <div class="d-flex flex-nowrap align-items-center">
+            <input type="number" class="form-control" id="edit-offset-h" min="0" max="23" inputmode="numeric" style="max-width:90px;">
+            <span class="mx-2">h</span>
+            <input type="number" class="form-control" id="edit-offset-m" min="0" max="59" inputmode="numeric" style="max-width:90px;">
+            <span class="mx-2">min</span>
+          </div>
+        </div>
+
+        <!-- REPEAT -->
+        <div class="form-group">
+          <label for="edit-repeat">Repeat</label>
+          <select class="form-control" id="edit-repeat">
+            <option value="daily">Every Day</option>
+            <option value="custom">Custom</option>
+            <option value="once">Once</option>
+          </select>
+        </div>
+
+        <!-- EVENT-SPECIFIC BLOCK (custom loop only) -->
+        <div id="custom-repeat-group" class="collapse">
+
+          <!-- ON row -->
+          <div class="form-group d-flex align-items-center mb-2">
+            <label class="mr-3 mb-0" style="width:40px;">On</label>
+
+            <div class="d-flex align-items-center mr-3">
+              <input type="number" class="form-control" id="edit-on-min" min="0" max="59" value="0" style="width:70px;">
+              <span class="ml-1">min</span>
+            </div>
+
+            <div class="d-flex align-items-center">
+              <input type="number" class="form-control" id="edit-on-sec" min="0" max="59" value="0" style="width:70px;">
+              <span class="ml-1">sec</span>
+            </div>
+          </div>
+
+          <!-- OFF row -->
+          <div class="form-group d-flex align-items-center">
+            <label class="mr-3 mb-0" style="width:40px;">Off</label>
+
+            <div class="d-flex align-items-center mr-3">
+              <input type="number" class="form-control" id="edit-off-min" min="0" max="59" value="0"
+                style="width:70px;">
+              <span class="ml-1">min</span>
+            </div>
+
+            <div class="d-flex align-items-center">
+              <input type="number" class="form-control" id="edit-off-sec" min="0" max="59" value="0"
+                style="width:70px;">
+              <span class="ml-1">sec</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ENABLED -->
+        <div class="form-group">
+          <div class="custom-control custom-switch">
+            <input type="checkbox" class="custom-control-input" id="edit-enabled">
+            <label class="custom-control-label" for="edit-enabled">Enabled</label>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button id="modal-cancel-btn" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button id="save-edit" class="btn btn-primary">Save</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!--End Scedule modal -->
+
+<div id="saveAsModal" class="modal fade" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Save Task</h5>
+        <button type="button" class="close" data-dismiss="modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="save-as-hint" class="text-muted"></p>
+        <div class="form-group">
+          <label for="new-task-name">Task Name</label>
+          <input type="text" class="form-control" id="new-task-name" placeholder="e.g. Summer Growth" maxlength="32">
+        </div>
+        <div id="save-as-error" class="text-danger mt-1" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button class="btn btn-outline-primary" id="save-as-new">Save as new</button>
+        <button class="btn btn-primary" id="save-as-confirm">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete preset confirmation -->
+<div id="deleteModal" class="modal fade" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Delete schedule?</h5>
+      </div>
+      <div class="modal-body">
+        <p>"<span id="delete-task-name"></span>" will be deleted.</p>
+        <p id="delete-running-hint" class="text-danger">It is running now and will be stopped.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger" id="delete-confirm">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Exit confirmation -->
+<div id="exitModal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="exit-title">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="exit-title">Leave control panel?</h5>
+      </div>
+      <div class="modal-body">
+        The farm keeps running on its schedule. Your control session will be released.
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="exit-stay-btn">Stay</button>
+        <button class="btn btn-danger" id="exit-leave-btn">Leave</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Dashboard picker: the task list or the stage list, with a confirm step -->
+<div id="pickModal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="pick-title">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pick-title">Choose</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="pick-list" class="list-group list-group-flush"></div>
+        <div id="pick-confirm" class="p-3 d-none">
+          <div id="pick-question" class="mb-3"></div>
+          <div class="text-right">
+            <button type="button" class="btn btn-secondary btn-small mr-2" id="pick-cancel">Back</button>
+            <button type="button" class="btn btn-success btn-small" id="pick-ok">Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/jquery.js"></script>
+<script src="/popper.js"></script>
+<script src="/bootstrap.js"></script>
+<script src="/app.js"></script>
+</body>
+
+</html>

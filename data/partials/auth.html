@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Premifarm Captive Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/bootstrap.min.css">
+<!-- <script src="/jquery.js"></script>-->
+<!--  //  <script src="/bootstrap.js"></script>-->
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      src: url('/Inter-Regular.ttf') format('truetype');
+    }
+    body { background-color: #f8f9fa; }
+    .card { max-width: 400px; margin: auto; margin-top: 10vh; }
+    #status { margin-top: 15px; text-align: center; font-size: 1rem; color: #555; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="card shadow">
+      <div class="card-body" id="authBox">
+
+        <!-- LOGIN FORM -->
+        <h4 class="card-title text-center mb-3">Welcome to Premifarm</h4>
+        <p class="text-center">Scan the code on your minifarm cover and follow the link to access.</p>
+
+        <form method="POST" action="/login" onsubmit="return Submit();">
+          <div class="form-group">
+            <label for="password">Enter Password:</label>
+            <input type="password" class="form-control" id="password" required placeholder="Password">
+            <input type="hidden" id="validate" name="validate">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block mt-3">Submit</button>
+        </form>
+
+        <div id="status">Not authorized yet...</div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ONE continuous script block starts here -->
+  <script>
+let clue = null;
+function initConstants() {
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+
+  const summ = [];
+  const k = [];
+  const isComposite = {};
+
+  let primeCounter = 0;
+
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      for (let i = 0; i < 313; i += candidate) {
+        isComposite[i] = candidate;
+      }
+      summ[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter] = (mathPow(candidate, 1/3) * maxWord) | 0;
+      primeCounter++;
+    }
+  }
+
+  return { summ, k };
+}
+
+function rightRotate(value, amount) {
+  return (value >>> amount) | (value << (32 - amount));
+}
+
+function preprocessMessage(ascii) {
+  const asciiBitLength = ascii.length * 8;
+  let words = [];
+
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+
+  for (let i = 0; i < ascii.length; i++) {
+    const j = ascii.charCodeAt(i);
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+
+  words.push((asciiBitLength / Math.pow(2, 32)) | 0);
+  words.push(asciiBitLength);
+
+  return words;
+}
+
+
+function processChunk(words, summ, k) {
+  for (let j = 0; j < words.length;) {
+    const w = words.slice(j, j += 16);
+    const oldsumm = summ.slice(0);
+
+    for (let i = 0; i < 64; i++) {
+      const w15 = w[i - 15];
+      const w2 = w[i - 2];
+
+      const a = summ[0];
+      const e = summ[4];
+
+      const temp1 =
+        summ[7] +
+        (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) +
+        ((e & summ[5]) ^ (~e & summ[6])) +
+        k[i] +
+        (w[i] =
+          i < 16
+            ? w[i]
+            : (w[i - 16] +
+               (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) +
+               w[i - 7] +
+               (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+
+      const temp2 =
+        (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) +
+        ((a & summ[1]) ^ (a & summ[2]) ^ (summ[1] & summ[2]));
+
+      summ = [(temp1 + temp2) | 0].concat(summ);
+      summ[4] = (summ[4] + temp1) | 0;
+    }
+
+    for (let i = 0; i < 8; i++) {
+      summ[i] = (summ[i] + oldsumm[i]) | 0;
+    }
+  }
+
+  return summ;
+}
+
+
+function summToHex(summ) {
+  let result = '';
+
+  for (let i = 0; i < 8; i++) {
+    for (let j = 3; j + 1; j--) {
+      const b = (summ[i] >> (j * 8)) & 255;
+      result += (b < 16 ? '0' : '') + b.toString(16);
+    }
+  }
+
+  return result;
+}
+
+
+function main(ascii) {
+  const { summ: initialsumm, k } = initConstants();
+  const words = preprocessMessage(ascii);
+  const finalsumm = processChunk(words, initialsumm, k);
+  return summToHex(finalsumm);
+}
+
+
+function Submit() {
+  const statusEl = document.getElementById("status");
+  const passEl = document.getElementById("password");
+  const hiddenEl = document.getElementById("validate");
+
+  if (!clue) {
+    statusEl.textContent = "Still initializing… please wait a moment and try again.";
+    return false;
+  }
+
+  const word = passEl.value.trim();
+  if (!word) {
+    statusEl.textContent = "Please enter a password.";
+    return false;
+  }
+
+  const summed = main(word + clue);
+  hiddenEl.value = summed;
+
+  // allow normal form submit
+  return true;
+}
+
+async function loadClue() {
+  const statusEl = document.getElementById("status");
+
+  try {
+    const response = await fetch("/clue");
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.text();
+    clue = data.trim();
+
+    console.log("Clue loaded:", clue);
+    statusEl.textContent = "Ready. You can enter your password.";
+  } catch (err) {
+    console.error("Failed to load clue:", err);
+    statusEl.textContent = "Unable to load authentication key. Check connection and retry.";
+  }
+}
+
+
+}
+
+  loadClue();
+  </script>
+</body>
+</html>
+

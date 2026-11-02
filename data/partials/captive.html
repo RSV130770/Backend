@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Premifarm</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+
+
+  <link rel="stylesheet" href="/bootstrap.min.css">
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: sans-serif;
+    }
+    .card {
+      max-width: 420px;
+      margin: auto;
+      margin-top: 12vh;
+      padding: 25px;
+      text-align: center;
+    }
+    .btn-big {
+      padding: 16px;
+      font-size: 1.2rem;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="card shadow">
+      <h3 class="mb-3">Welcome to Premifarm</h3>
+      <p class="text-muted mb-4">
+        Tap the button below to open the full interface in your browser.
+      </p>
+
+      <a id="openBtn" class="btn btn-success btn-big btn-block">
+        Open Full Interface
+      </a>
+    </div>
+  </div>
+
+<script>
+(function() {
+  // Wait until AP_IP is defined
+  function waitForAP() {
+    if (typeof AP_IP === "undefined") {
+      return setTimeout(waitForAP, 10);
+    }
+
+    const btn = document.getElementById("openBtn");
+
+    if (navigator.userAgent.includes("Android")) {
+      const host = AP_IP.replace("http://", "");
+      btn.href = "intent://" + host + "/auth.html#Intent;scheme=http;end";
+    } else {
+      btn.href = AP_IP + "/auth.html";
+    }
+  }
+
+  waitForAP();
+})();
+</script>
+
+</body>
+</html>
