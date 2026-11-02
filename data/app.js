@@ -312,6 +312,7 @@ let currentPage = "dashboard";
 let startX = 0;
 let startY = 0;
 let swipeEnabled = true;
+let servicePauseByPlayground = false; 
 let sliderActive = false;
 
 function disableSwipe() { swipeEnabled = false; }
@@ -354,13 +355,22 @@ function showPage(name) {
   updateDots(index);
 //  updateFooterLabel();
   if (OFFLINE_MODE) return;
-  // Scheduler pause/resume logic
-  if (previous !== "playground" && name === "playground") {
-  if (taskStatus === "running") requestTaskPause();
+  // Scheduler pause/resume: entering Playground from the Dashboard side
+  // pauses a running task; coming back to Dashboard or Schedule resumes it.
+  // Settings is neutral: Playground <-> Settings changes nothing.
+  const TASK_PAGES = ["dashboard", "schedule"];
+  const wasTask = TASK_PAGES.includes(previous);
+  const isTask  = TASK_PAGES.includes(name);
+  if (wasTask && name === "playground") {
+    if (taskStatus === "running") {
+      servicePauseByPlayground = true;
+      requestTaskPause();
+    }
+  } else if (!wasTask && isTask) {
+    if (servicePauseByPlayground && taskStatus === "paused") requestTaskResume();
+    servicePauseByPlayground = false;
   }
-  else if (previous === "playground" && name !== "playground") {
-  if (taskStatus === "paused") requestTaskResume();
-  }
+}
 }
 
 
