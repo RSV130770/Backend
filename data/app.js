@@ -371,7 +371,7 @@ function showPage(name) {
     servicePauseByPlayground = false;
   }
 }
-}
+
 
 
 /* ============================================================
@@ -1735,9 +1735,14 @@ function loadScheduleFromTask() {
 // Show a preset from /preset/content in the tree.
 // Plant presets (described by growth "phases") can be started from the
 // dashboard but cannot be edited here.
+// Stages of the loaded task. Sent back unchanged on save until the editor
+// can edit stages; groups keep their stage (stageId) when edited.
+let taskStages = [];
+
 function showPresetSchedule(data) {
   currentTaskName = data.name;
   taskContent = Array.isArray(data.schedule) ? data.schedule : [];
+  taskStages = Array.isArray(data.stages) ? data.stages : [];
   renderSchedule(taskContent);
   if (!Array.isArray(data.schedule) && Array.isArray(data.phases)) {
     $('#schedule-tree').html(
@@ -2120,6 +2125,8 @@ function saveBatchItem() {
 
   // Build events array
   const events = [];
+  // An edited group stays in its stage (a new group goes to the first one)
+  const groupStage = existingEvents.length ? existingEvents[0].stageId : undefined;
 
   outputsConfig.forEach(cfg => {
     // Read duty per channel mode
@@ -2135,6 +2142,7 @@ function saveBatchItem() {
     if (isMessageCfg(cfg) && withPause) return;   // the freeze event below
 
     const base = {
+      stageId: groupStage,          // dropped by JSON.stringify when undefined
       groupId: currentBatchGroupId,
       channelId: cfg.id,
       afterDays: parseInt($('#batch-after-days').val()) || 0,
@@ -2402,7 +2410,9 @@ function sendScheduleToServer(index, name) {
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({
-      preset: { id: index, name: name, schedule: taskContent }
+      preset: taskStages.length
+        ? { id: index, name: name, stages: taskStages, schedule: taskContent }
+        : { id: index, name: name, schedule: taskContent }
     }),
     success: resp => {
       console.log("Preset saved:", resp);
