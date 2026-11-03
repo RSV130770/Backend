@@ -21,7 +21,6 @@ enum EventType {
   EVENT_ONCE,
   EVENT_FREEZE
 };
-extern uint32_t freezeEntryEpoch;  // when freeze began
 
 // --
 // Stages of the running preset (built by buildEventsFromPreset)

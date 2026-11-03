@@ -60,7 +60,6 @@ bool MachineEvent::isExpired() const {
   const bool waitingHere = activeFreeze && activeFreeze->stageIdx == stageIdx;
   return NOW_EPOCH >= (waitingHere ? ownEndEpoch : endEpoch);
 }
-uint32_t freezeEntryEpoch;   // when freeze began
 //---
 // MachineEvent::toJson / fromJson (common fields)
 //---
