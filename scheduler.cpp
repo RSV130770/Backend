@@ -92,20 +92,6 @@ void schedulerNoticeOk() {
   Serial.println("Message confirmed with OK");
 }
 
-// Number the pause points in time order, so "confirmed up to N" (E)
-// stays valid after the events are rebuilt (reboot, edit)
-static void numberFreezeEvents() {
-  std::vector<FreezeEvent*> fz;
-  for (auto* ev : EVENTS)
-    if (ev->type == EVENT_FREEZE) fz.push_back(static_cast<FreezeEvent*>(ev));
-  std::sort(fz.begin(), fz.end(), [](FreezeEvent* a, FreezeEvent* b) {
-    uint32_t ta = a->afterDays * 1440u + a->hour * 60u + a->minute;
-    uint32_t tb = b->afterDays * 1440u + b->hour * 60u + b->minute;
-    return ta < tb;
-  });
-  for (size_t i = 0; i < fz.size(); i++) fz[i]->seq = (uint8_t)i;
-}
-
 // The first pause point that is reached and not confirmed yet, or nullptr
 static FreezeEvent* findDueFreeze(uint32_t effectiveNow) {
   FreezeEvent* due = nullptr;
@@ -119,14 +105,6 @@ static FreezeEvent* findDueFreeze(uint32_t effectiveNow) {
   return due;
 }
 
-// When an event's place in the task begins: a daily event from its start
-// day on, the others at their activation. While the task waits at a pause
-// point, events that begin after it are held back.
-static uint32_t eventBegins(const MachineEvent* ev) {
-  if (ev->type == EVENT_DAILY)
-    return clockTimeOnTaskDay(ev->afterDays, 0, 0);
-  return ev->activationEpoch;
-}
 // -----------------------------
 // RTC → NOW + NOW_EPOCH
 // -----------------------------
@@ -190,36 +168,37 @@ static void computeAllActivationTimes() {
   }
 }
 
+static void schedulerTickWrapper();   // defined below
+
 // Daily events whose time has passed but that were not the newest for their
 // channel (e.g. the 06:30 "on" when it is already after the 22:30 "off")
 // must move to their next occurrence, or they would fire on the next tick.
 // Once events are the same: applied once, when they are the newest for their
 // channel; afterwards (or when a newer event won) they are done, otherwise
 // an old once event would take the channel back from a daily event as soon
-// as that one moves on to tomorrow.
-static void skipPassedDailyEvents(uint32_t effectiveNow) {
+// as that one moves on to tomorrow. Events whose stage has not begun yet
+// are left alone: they act at their stage start.
+static void skipPassedDailyEvents(uint32_t now) {
   for (auto* ev : EVENTS) {
-    if (ev->type == EVENT_DAILY && ev->activationEpoch <= effectiveNow)
+    if (now < ev->beginEpoch) continue;
+    if (ev->type == EVENT_DAILY && ev->activationEpoch <= now)
       static_cast<DailyEvent*>(ev)->advanceToNext();
-    else if (ev->type == EVENT_ONCE && ev->activationEpoch <= effectiveNow)
+    else if (ev->type == EVENT_ONCE && ev->activationEpoch <= now)
       ev->done = true;
   }
 }
 
-/*
-void debug_event_actuate(event &ev)
-{
+// No stage is held back
+static const uint8_t HOLD_NONE = 255;
 
-}
-  
-*/
-uint32_t effectiveNow=0;
-static void retrospectiveApply() {
-  updateNow();
-
-  // Time spent stopped is added to the task start (see
-  // shiftStartByWholeDays), so the schedule runs on the real clock
-  uint32_t effectiveNow = NOW_EPOCH;
+// Per output: the event in effect now (the newest one that may act) and the
+// next one ahead; apply the first, count down to the second.
+// restore = true after a start, reboot, resume or stage change: an output
+// that no event drives is switched off (the Message output keeps its text).
+// holdStage: while the task waits at the end of a stage, the stages after it
+// stay held back.
+static void evaluate(bool restore, uint8_t holdStage) {
+  const uint32_t now = NOW_EPOCH;
 
   MachineEvent* bestPast[OUTPUT_COUNT]     = {};
   uint32_t      bestPastTime[OUTPUT_COUNT] = {};
@@ -227,35 +206,26 @@ static void retrospectiveApply() {
   uint32_t      bestFutureTime[OUTPUT_COUNT];
   for (int i = 0; i < OUTPUT_COUNT; i++) bestFutureTime[i] = UINT32_MAX;
 
-  // Events after a reached, unconfirmed pause point stay held back (e.g.
-  // after a reboot while the task waits)
-  FreezeEvent* due = findDueFreeze(effectiveNow);
-  const uint32_t holdAfter = due ? due->activationEpoch : UINT32_MAX;
-
   for (auto* ev : EVENTS) {
     if (!ev->enabled) continue;
     if (ev->type == EVENT_FREEZE) continue;
-    if (eventBegins(ev) > holdAfter) continue;
+    if (ev->done) continue;                    // once event already applied
+    if (ev->stageIdx > holdStage) continue;    // waits for Continue
     if (ev->isExpired()) continue;
 
     uint8_t ch = ev->channelId;
     if (ch >= OUTPUT_COUNT) continue;
 
-    Serial.print("Event cn: ");
-    Serial.print(ch);
-    Serial.print("&");
-    Serial.println(printHHMM(ev->hour, ev->minute));
-
-    if (ev->activationEpoch <= effectiveNow) {
+    // Newest by its own time; but it cannot act before its stage begins
+    const uint32_t when = ev->effectiveFrom();
+    if (when <= now) {
       if (ev->activationEpoch >= bestPastTime[ch]) {
         bestPast[ch]     = ev;
         bestPastTime[ch] = ev->activationEpoch;
       }
-    } else {
-      if (ev->activationEpoch <= bestFutureTime[ch]) {
-        bestFuture[ch]     = ev;
-        bestFutureTime[ch] = ev->activationEpoch;
-      }
+    } else if (when <= bestFutureTime[ch]) {
+      bestFuture[ch]     = ev;
+      bestFutureTime[ch] = when;
     }
   }
 
@@ -263,37 +233,53 @@ static void retrospectiveApply() {
     if (bestPast[ch]) {
       applyEvent(bestPast[ch]);
       lastApplied[ch] = bestPast[ch];
-      Serial.print("Event: ");
-      Serial.print(printHHMM(bestPast[ch]->hour, bestPast[ch]->minute));
-      Serial.print(" actuated channel:");
-      Serial.print(ch);
-      Serial.print(" with value: ");
-      Serial.println(bestPast[ch]->duty);
+    } else if (restore) {
+      if (ch != ID_MESSAGE) OUT[ch].setTarget(0);   // no event drives it
+      lastApplied[ch] = nullptr;
+    } else if (lastApplied[ch] && lastApplied[ch]->isExpired()) {
+      // Its last event ended (e.g. at a stage end): switch it off
+      OUT[ch].setTarget(0);
+      lastApplied[ch] = nullptr;
     }
 
     MachineEvent* evForRemaining = bestFuture[ch] ? bestFuture[ch] : bestPast[ch];
-    if (evForRemaining) {
-      evForRemaining->ToNextSwitch();
-      Serial.print("Event: ");
-      Serial.print(printHHMM(evForRemaining->hour, evForRemaining->minute));
-      Serial.print(" calculated channel:");
-      Serial.println(ch);
-    }
-
-    Serial.printf("lastApplied[%d] = %p\n", ch, lastApplied[ch]);
-    Serial.printf("remaining[%d]   = %p\n", ch, evForRemaining);
-    Serial.println();
+    if (evForRemaining) evForRemaining->ToNextSwitch();
   }
-  skipPassedDailyEvents(effectiveNow);
-
-  Serial.print("RTC RAW: ");
-  Serial.print(RTC.yyyy); Serial.print("-");
-  Serial.print(RTC.mm);   Serial.print("-");
-  Serial.print(RTC.dd);   Serial.print(" ");
-  Serial.print(RTC.h);    Serial.print(":");
-  Serial.print(RTC.m);    Serial.print(":");
-  Serial.println(RTC.s);
+  skipPassedDailyEvents(now);
 }
+
+static void retrospectiveApply() {
+  updateNow();
+
+  // Waiting at a stage end (e.g. after a reboot): the ending stage goes on,
+  // the stages after it stay held back
+  FreezeEvent* due = findDueFreeze(NOW_EPOCH);
+  if (due) activeFreeze = due;
+
+  evaluate(true, due ? due->stageIdx : HOLD_NONE);
+
+  Serial.printf("Schedule applied at %s, stage %d\n",
+                epochToStr(NOW_EPOCH).c_str(), schedulerStageIndex());
+}
+
+// The last stage has a length and it has ended: the task is finished
+static bool lastStageEnded() {
+  if (STAGES.empty() || STAGES.back().lenMin == 0) return false;
+  return NOW_EPOCH >= stageEndEpoch((uint8_t)(STAGES.size() - 1));
+}
+
+// Task finished: outputs off, events kept so the page can still show the
+// stages; Start runs it again from stage 1
+static void schedulerFinish() {
+  TASK_STATUS = T_FINISHED;
+  activeFreeze = nullptr;
+  setPauseStart(0);
+  saveTaskData();
+  physicalOutputsOff();
+  for (int ch = 0; ch < OUTPUT_COUNT; ch++) lastApplied[ch] = nullptr;
+  Serial.println("Task finished: the last stage has ended");
+}
+
 // -----------------------------
 // Main scheduler tick
 // -----------------------------
@@ -315,69 +301,71 @@ void schedulerTick() {
   }
   lastTickEpoch = NOW_EPOCH;
 
-  uint32_t effectiveNow = NOW_EPOCH;
-
-  // Per-channel: track best candidate
-  MachineEvent* bestPast[OUTPUT_COUNT]     = {};
-  uint32_t      bestPastTime[OUTPUT_COUNT] = {};
-  MachineEvent* bestFuture[OUTPUT_COUNT]   = {};
-  uint32_t      bestFutureTime[OUTPUT_COUNT];
-  for (int i = 0; i < OUTPUT_COUNT; i++) bestFutureTime[i] = UINT32_MAX;
-
-  // A pause point reached: wait for the user. Running processes go on;
-  // events that begin after the pause point are held back.
-  FreezeEvent* dueFreeze = findDueFreeze(effectiveNow);
+  // A stage end with a pause reached: wait for the user. The ending stage
+  // goes on; the stages after it are held back.
+  FreezeEvent* dueFreeze = findDueFreeze(NOW_EPOCH);
   if (dueFreeze) {
     activeFreeze = dueFreeze;
     if (TASK_STATUS != T_FROZEN) {
       TASK_STATUS = T_FROZEN;
       setPauseStart(dueFreeze->activationEpoch);   // fallback for Continue
       saveTaskData();
-      Serial.printf("Task waits at pause %u: %s\n", dueFreeze->seq, dueFreeze->message.c_str());
+      Serial.printf("Task waits at the end of stage %u: %s\n",
+                    dueFreeze->seq + 1, dueFreeze->message.c_str());
     }
-  }
-  const uint32_t holdAfter =
-    (TASK_STATUS == T_FROZEN && activeFreeze) ? activeFreeze->activationEpoch : UINT32_MAX;
-
-  for (auto* ev : EVENTS) {
-    if (!ev->enabled) continue;
-    if (ev->type == EVENT_FREEZE) continue;
-    if (ev->done) continue;                 // once event already applied
-    if (eventBegins(ev) > holdAfter) continue;
-
-    if (ev->isExpired()) continue;
-
-    uint8_t ch = ev->channelId;
-    if (ch >= OUTPUT_COUNT) continue;
-
-    if (ev->activationEpoch <= effectiveNow) {
-      if (ev->activationEpoch >= bestPastTime[ch]) {
-        bestPast[ch]     = ev;
-        bestPastTime[ch] = ev->activationEpoch;
-      }
-    } else {
-      if (ev->activationEpoch <= bestFutureTime[ch]) {
-        bestFuture[ch]     = ev;
-        bestFutureTime[ch] = ev->activationEpoch;
-      }
-    }
+  } else if (lastStageEnded()) {
+    schedulerFinish();
+    return;
   }
 
-  // Apply and compute remaining per channel
-  for (int ch = 0; ch < OUTPUT_COUNT; ch++) {
-    if (bestPast[ch]) {
-      applyEvent(bestPast[ch]);
-      lastApplied[ch] = bestPast[ch];
-    } else if (lastApplied[ch] && lastApplied[ch]->isExpired()) {
-      // Last active event just expired — zero the output
-      OUT[ch].setTarget(0);
-      lastApplied[ch] = nullptr;
-    }
+  const uint8_t hold =
+    (TASK_STATUS == T_FROZEN && activeFreeze) ? activeFreeze->stageIdx : HOLD_NONE;
+  evaluate(false, hold);
+}
 
-    MachineEvent* evForRemaining = bestFuture[ch] ? bestFuture[ch] : bestPast[ch];
-    if (evForRemaining) evForRemaining->ToNextSwitch();
-  }
-  skipPassedDailyEvents(effectiveNow);
+// -----------------------------
+// Stages: current stage, manual change
+// -----------------------------
+// Index of the current stage: while waiting, the stage that ended; else the
+// last stage that has begun. -1 when nothing is loaded.
+int schedulerStageIndex() {
+  if (STAGES.empty()) return -1;
+  if (activeFreeze) return activeFreeze->stageIdx;
+  int idx = 0;
+  for (size_t i = 0; i < STAGES.size(); i++)
+    if (stageStartEpoch((uint8_t)i) <= NOW_EPOCH) idx = (int)i;
+  return idx;
+}
+
+// Make a stage active now (Dashboard): the task start moves so that this
+// stage begins now. Pauses at the end of this stage and later ones are
+// asked again; a wait or a service pause ends.
+bool schedulerSetStage(uint8_t stageId) {
+  const int idx = stageIndexById(stageId);
+  if (idx < 0) return false;
+  if (TASK_STATUS != T_START && TASK_STATUS != T_PAUSE && TASK_STATUS != T_FROZEN)
+    return false;
+
+  updateNow();
+  uint32_t start = NOW_EPOCH - STAGES[idx].offsetMin * 60u;
+  start -= start % 60u;                 // the RTC keeps the start to the minute
+  schedulerStartEpoch = start;
+  time_t st = (time_t)start;
+  tm startTm = *localtime(&st);
+  PutStartTimetoRtc(startTm);
+
+  FREEZE_DONE  = (uint8_t)idx;          // re-arm the pauses from this stage on
+  activeFreeze = nullptr;
+  setPauseStart(0);
+  TASK_STATUS  = T_START;
+  saveTaskData();
+
+  computeAllActivationTimes();
+  retrospectiveApply();
+  schedulerTicker.detach();
+  schedulerTicker.attach_ms(1000, schedulerTickWrapper);
+  Serial.printf("Stage %d (%s) set active\n", idx + 1, STAGES[idx].name.c_str());
+  return true;
 }
 
 // Wrapper for Ticker
@@ -503,20 +491,74 @@ void schedulerStop() {
   Serial.println("Scheduler stopped");
 }
 
+// One stage of the running preset
+static void addStage(uint8_t id, const char* name, uint32_t lenMin,
+                     bool endPause, const char* message, uint32_t& offsetMin) {
+  StageInfo si;
+  si.id        = id;
+  si.name      = name;
+  si.offsetMin = offsetMin;
+  si.lenMin    = lenMin;
+  si.endPause  = endPause;
+  si.message   = message;
+  STAGES.push_back(si);
+  offsetMin += lenMin;
+}
+
+// A pause at the end of every stage that asks for one (open-ended stages
+// have no end). seq = stage index, so FREEZE_DONE counts confirmed stages.
+static void addStageEndPauses() {
+  for (size_t i = 0; i < STAGES.size(); i++) {
+    if (!STAGES[i].endPause || STAGES[i].lenMin == 0) continue;
+    FreezeEvent* fe = new FreezeEvent();
+    fe->stageIdx = (uint8_t)i;
+    fe->seq      = (uint8_t)i;
+    fe->message  = STAGES[i].message;
+    fe->enabled  = true;
+    EVENTS.push_back(fe);
+  }
+}
+
 void buildEventsFromPreset(const JsonObject& preset) {
   deleteEvents();
+  STAGES.clear();
+  uint32_t offsetMin = 0;
 
   // Event-list preset (made in the web schedule editor, and the built-in
-  // template): "schedule" is an array of events, see MachineEvent::fromJson
+  // template): "schedule" is an array of events, see MachineEvent::fromJson.
+  // "stages" lists the stages in run order; each event names its stage with
+  // "stageId". A preset without stages runs as one open-ended stage.
   JsonArray schedule = preset["schedule"].as<JsonArray>();
   if (!schedule.isNull()) {
-    for (JsonObject e : schedule) {
-      MachineEvent* ev = createEventFromJson(e);
-      if (ev) EVENTS.push_back(ev);
+    JsonArray stages = preset["stages"].as<JsonArray>();
+    if (!stages.isNull() && stages.size() > 0) {
+      for (JsonObject s : stages) {
+        uint32_t lenMin = ((uint32_t)(s["days"] | 0) * 24u + (uint32_t)(s["hours"] | 0)) * 60u;
+        addStage(s["id"] | 0, s["name"] | "Stage", lenMin,
+                 s["endPause"] | false, s["message"] | "", offsetMin);
+        if (lenMin == 0 && STAGES.size() < stages.size()) {
+          Serial.println("Open-ended stage before the last one: later stages ignored");
+          break;
+        }
+      }
+    } else {
+      addStage(1, preset["name"] | "Task", 0, false, "", offsetMin);
     }
-    numberFreezeEvents();
-    Serial.printf("Built %u events from schedule of preset %s\n",
-                  EVENTS.size(), preset["name"] | "unknown");
+
+    uint16_t dropped = 0;
+    for (JsonObject e : schedule) {
+      // Old pause points inside a schedule are dropped: stage ends pause now
+      if (strcmp(e["repeat"] | "", "freeze") == 0) { dropped++; continue; }
+      const int idx = stageIndexById(e["stageId"] | STAGES[0].id);
+      if (idx < 0) { dropped++; continue; }
+      MachineEvent* ev = createEventFromJson(e);
+      if (!ev) continue;
+      ev->stageIdx = (uint8_t)idx;
+      EVENTS.push_back(ev);
+    }
+    addStageEndPauses();
+    Serial.printf("Built %u events in %u stages from preset %s (%u dropped)\n",
+                  EVENTS.size(), STAGES.size(), preset["name"] | "unknown", dropped);
     return;
   }
 
@@ -530,21 +572,15 @@ void buildEventsFromPreset(const JsonObject& preset) {
                   darkDays, lightDays);
   }
 
-  uint8_t dayOffset = 0;
-
+  // Every phase becomes a stage; its events last the whole stage. The old
+  // "froze" flags are dropped.
   for (JsonObjectConst phase : preset["phases"].as<JsonArrayConst>()) {
     uint8_t phaseDays = phase["days"] | 0;
-    bool    frozen    = phase["froze"] | false;
-
-    // FreezeEvent at start of phase if flagged
-    if (frozen) {
-      FreezeEvent* fe = new FreezeEvent();
-      fe->afterDays = dayOffset;
-      fe->hour      = 0;
-      fe->minute    = 0;
-      fe->enabled   = true;
-      EVENTS.push_back(fe);
-    }
+    char stageName[16];
+    snprintf(stageName, sizeof(stageName), "Phase %u", (unsigned)(STAGES.size() + 1));
+    addStage((uint8_t)(STAGES.size() + 1), phase["name"] | (const char*)stageName,
+             (uint32_t)phaseDays * 1440u, false, "", offsetMin);
+    const uint8_t stageIdx = (uint8_t)(STAGES.size() - 1);
 
     // --- LIGHT ---
     JsonObjectConst light = phase["light"];
@@ -569,8 +605,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
         // ON event
         DailyEvent* on  = new DailyEvent();
         on->channelId   = lc.ch;
-        on->afterDays   = dayOffset;
-        on->durationDays = phaseDays;
+        on->stageIdx   = stageIdx;
         on->hour        = startH;
         on->minute      = startM;
         on->duty        = (uint8_t)((pct * 255) / 100);
@@ -581,8 +616,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
         // OFF event
         DailyEvent* off  = new DailyEvent();
         off->channelId   = lc.ch;
-        off->afterDays   = dayOffset;
-        off->durationDays = phaseDays;
+        off->stageIdx   = stageIdx;
         off->hour        = endH;
         off->minute      = endM;
         off->duty        = 0;
@@ -599,8 +633,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
       if (pct > 0) {
         CustomEvent* ce  = new CustomEvent();
         ce->channelId    = ID_UV;
-        ce->afterDays    = dayOffset;
-        ce->durationDays = phaseDays;
+        ce->stageIdx    = stageIdx;
         ce->hour         = 0;
         ce->minute       = 0;
         ce->duty         = (uint8_t)((pct * 255) / 100);
@@ -618,8 +651,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
       if (enabled) {
         CustomEvent* ce  = new CustomEvent();
         ce->channelId    = ID_PUMP;
-        ce->afterDays    = dayOffset;
-        ce->durationDays = phaseDays;
+        ce->stageIdx    = stageIdx;
         ce->hour         = 0;
         ce->minute       = 0;
         ce->duty         = 255;
@@ -637,8 +669,7 @@ void buildEventsFromPreset(const JsonObject& preset) {
       if (enabled) {
         CustomEvent* ce  = new CustomEvent();
         ce->channelId    = ID_MIST;
-        ce->afterDays    = dayOffset;
-        ce->durationDays = phaseDays;
+        ce->stageIdx    = stageIdx;
         ce->hour         = 0;
         ce->minute       = 0;
         ce->duty         = 255;
@@ -649,12 +680,11 @@ void buildEventsFromPreset(const JsonObject& preset) {
       }
     }
 
-    dayOffset += phaseDays;
+    if (phaseDays == 0) break;          // open-ended: the last stage
   }
 
-  numberFreezeEvents();
-  Serial.printf("Built %u events from preset %s\n",
-                EVENTS.size(), preset["name"] | "unknown");
+  Serial.printf("Built %u events in %u stages from phases of preset %s\n",
+                EVENTS.size(), STAGES.size(), preset["name"] | "unknown");
 }
 
 

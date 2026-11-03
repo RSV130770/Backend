@@ -39,7 +39,9 @@ extern String wifiSSID;           // last known STA ssid
 extern String wifiPass;           // last known STA password
 extern IPAddress IP;              // softAP address (192.168.4.1)
 extern DNSServer dnsServer;       // captive-portal DNS
-extern char *ssid;                // default AP SSID (fallback)
+extern char *ssid;                // factory AP name (fallback)
+extern String apName;             // AP name in use (Settings or factory)
+String farmHostName();            // AP name as host name, e.g. premifarm-ths3-1
 extern void saveWifiCredentials(const String &ssid, const String &pass);
 extern bool loadWifiCredentials();
 extern String generateRandomKey(int len);
@@ -79,6 +81,12 @@ public:
     if (host.length() == 0) return false;
     if (host == IP.toString()) return false;
     if (WiFi.status() == WL_CONNECTED && host == WiFi.localIP().toString()) return false;
+    // Our name on the home network: <name>.local (mDNS), or the name the
+    // router gives us, e.g. <name>.lan or <name>.fritz.box
+    String h = host;
+    h.toLowerCase();
+    const String name = farmHostName();
+    if (h == name || h.startsWith(name + ".")) return false;
     return true;
   }
 

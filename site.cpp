@@ -454,19 +454,12 @@ void handleSite() {
     if (!isAuthorized(req)) { req->send(403); return; }
     lastActivityMs = millis();
 
-    String apSsid = "";
-    if (SPIFFS.exists("/ap_ssid.txt")) {
-      File f = SPIFFS.open("/ap_ssid.txt", "r");
-      if (f) { apSsid = f.readStringUntil('\n'); apSsid.trim(); f.close(); }
-    }
+    String apSsid = apName;           // the name in use (Settings or factory)
 
-    String staSsid = "";
-    bool staSaved = false;
-    if (SPIFFS.exists("/sta_ssid.txt")) {
-      File f = SPIFFS.open("/sta_ssid.txt", "r");
-      if (f) { staSsid = f.readStringUntil('\n'); staSsid.trim(); f.close(); }
-      staSaved = staSsid.length() > 0;
-    }
+    // The home network as the home network code uses it (/wifi.json)
+    loadWifiCredentials();
+    String staSsid = wifiSSID;
+    bool staSaved = staSsid.length() > 0;
     bool staConnected = stationConnected && (WiFi.status() == WL_CONNECTED);
 
     String json = "{";
@@ -534,16 +527,19 @@ void handleSite() {
         if (f) { f.print(apPass); f.close(); }
       }
 
+      // Home network: saved where the home network code reads it. An empty
+      // password field keeps the saved password.
       String staSsid = doc["sta_ssid"] | "";
       String staPass = doc["sta_pass"] | "";
       staSsid.trim();
+      Serial.printf("Settings: sta_ssid='%s', sta_pass %s\n", staSsid.c_str(),
+                    staPass.length() ? "given" : "empty, keeping the saved one");
       if (staSsid.length() > 0) {
-        File f = SPIFFS.open("/sta_ssid.txt", "w");
-        if (f) { f.print(staSsid); f.close(); }
-      }
-      if (staPass.length() > 0) {
-        File f = SPIFFS.open("/sta_pass.txt", "w");
-        if (f) { f.print(staPass); f.close(); }
+        if (staPass.length() == 0) {
+          loadWifiCredentials();
+          staPass = wifiPass;
+        }
+        saveWifiCredentials(staSsid, staPass);
       }
 
       req->send(200, "application/json", "{\"status\":\"ok\",\"restart\":true}");

@@ -1,6 +1,65 @@
 #include "machine.h"
 
 std::vector<MachineEvent *> EVENTS;
+std::vector<StageInfo> STAGES;
+
+//---
+// Stage times
+//---
+uint32_t stageStartEpoch(uint8_t idx) {
+  if (idx >= STAGES.size()) return schedulerStartEpoch;
+  return schedulerStartEpoch + STAGES[idx].offsetMin * 60u;
+}
+
+uint32_t stageEndEpoch(uint8_t idx) {
+  if (idx >= STAGES.size() || STAGES[idx].lenMin == 0) return UINT32_MAX;
+  return stageStartEpoch(idx) + STAGES[idx].lenMin * 60u;
+}
+
+int stageIndexById(uint8_t id) {
+  for (size_t i = 0; i < STAGES.size(); i++)
+    if (STAGES[i].id == id) return (int)i;
+  return -1;
+}
+
+uint32_t dayMidnight(uint32_t epoch, int days) {
+  time_t t = (time_t)epoch;
+  tm d = *localtime(&t);
+  d.tm_mday += days;
+  d.tm_hour = 0;
+  d.tm_min  = 0;
+  d.tm_sec  = 0;
+  return (uint32_t)mktime(&d);
+}
+
+// HH:MM on the calendar day "days" after the day of "epoch"
+static uint32_t clockOnDay(uint32_t epoch, int days, uint8_t hour, uint8_t minute) {
+  time_t t = (time_t)epoch;
+  tm d = *localtime(&t);
+  d.tm_mday += days;
+  d.tm_hour = hour;
+  d.tm_min  = minute;
+  d.tm_sec  = 0;
+  return (uint32_t)mktime(&d);
+}
+
+static uint32_t minEpoch(uint32_t a, uint32_t b) { return a < b ? a : b; }
+
+// The event's window inside its stage. Day 0 begins when the stage begins
+// (any time of day); a later day begins at its midnight. "expireAfterDays"
+// ends it at midnight after its last day; the stage end cuts it in any case.
+void MachineEvent::computeWindow() {
+  const uint32_t ss = stageStartEpoch(stageIdx);
+  beginEpoch  = afterDays ? dayMidnight(ss, afterDays) : ss;
+  ownEndEpoch = durationDays ? dayMidnight(ss, (int)afterDays + durationDays) : UINT32_MAX;
+  endEpoch    = minEpoch(ownEndEpoch, stageEndEpoch(stageIdx));
+}
+
+bool MachineEvent::isExpired() const {
+  // Waiting for Continue at the end of this event's stage: the stage goes on
+  const bool waitingHere = activeFreeze && activeFreeze->stageIdx == stageIdx;
+  return NOW_EPOCH >= (waitingHere ? ownEndEpoch : endEpoch);
+}
 uint32_t freezeEntryEpoch;   // when freeze began
 //---
 // MachineEvent::toJson / fromJson (common fields)
@@ -19,6 +78,7 @@ void MachineEvent::toJson(JsonObject &o) const {
   uint8_t pct = (uint8_t)((duty * 100) / 255);
   o["duty"] = pct;
   if (message.length()) o["message"] = message;
+  if (stageIdx < STAGES.size()) o["stageId"] = STAGES[stageIdx].id;
 }
 
 bool MachineEvent::fromJson(const JsonObject &o) {
@@ -87,31 +147,23 @@ void DailyEvent::advanceToNext() {
   activationEpoch = next;
 }
 
-// A daily event belongs to the task from the start (midnight) of its first
-// day: task start day + afterDays. Its activation is the most recent
-// occurrence of HH:MM since then, so the scheduler applies the state that
-// should be in effect right now (after a start, a reboot, or the clock set
-// back); if its first day has not come yet, its first occurrence.
+// A daily event counts from midnight of its first day (stage start day +
+// afterDays). Its activation is the most recent occurrence of HH:MM since
+// then, so the scheduler applies the state that should be in effect now
+// (after a start, a reboot, a stage change or the clock set back). Before
+// its stage begins it is measured at the stage start: e.g. a stage started
+// at 14:37 applies its 06:30 "on" at 14:37. If its first day has not come
+// yet, its first occurrence.
 void DailyEvent::computeActivation() {
-  const time_t begins = (time_t)clockTimeOnTaskDay(afterDays, 0, 0);
+  computeWindow();
+  const uint32_t dayBase = dayMidnight(stageStartEpoch(stageIdx), afterDays);
+  const uint32_t ref = NOW_EPOCH > beginEpoch ? NOW_EPOCH : beginEpoch;
 
-  tm t = NOW;
-  t.tm_hour = hour;
-  t.tm_min  = minute;
-  t.tm_sec  = 0;
-  const time_t today  = mktime(&t);
-  const time_t latest = (today <= (time_t)NOW_EPOCH) ? today : today - 86400;
+  uint32_t latest = clockOnDay(ref, 0, hour, minute);
+  if (latest > ref) latest = clockOnDay(ref, -1, hour, minute);
 
-  if (latest >= begins) {
-    activationEpoch = latest;
-    return;
-  }
-  activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);   // first one
-}
-
-bool DailyEvent::isExpired() const {
-  if (durationDays == 0) return false;
-  return NOW_EPOCH >= clockTimeOnTaskDay((uint16_t)afterDays + durationDays, 0, 0);
+  activationEpoch = (latest >= dayBase) ? latest
+                                        : clockOnDay(latest, 1, hour, minute);
 }
 
 void DailyEvent::ToNextSwitch() const {
@@ -193,12 +245,16 @@ void CustomEvent::ToNextSwitch() const {
     else
         out->remaining = cycle - pos;
 }
+// A cycle starts at its stage start + afterDays + its time offset
 void CustomEvent::computeActivation() {
-    activationEpoch =
-        schedulerStartEpoch +
-        afterDays * 86400u +
-        hour * 3600u +
-        minute * 60u;
+  computeWindow();
+  activationEpoch = stageStartEpoch(stageIdx) + afterDays * 86400u +
+                    hour * 3600u + minute * 60u;
+  beginEpoch = activationEpoch;
+  if (durationDays) {
+    ownEndEpoch = activationEpoch + (uint32_t)durationDays * 86400u;
+    endEpoch = minEpoch(ownEndEpoch, stageEndEpoch(stageIdx));
+  }
 }
 
 // Clock time HH:MM on the day (task start day + afterDays). The web editor
@@ -212,8 +268,15 @@ uint32_t clockTimeOnTaskDay(uint16_t days, uint8_t hour, uint8_t minute) {
   return (uint32_t)mktime(&t);
 }
 
+// HH:MM on its day of the stage. A time before the stage start (e.g. 00:00
+// on day 0 of a stage started at 14:37) acts at the stage start.
 void OnceEvent::computeActivation() {
-  activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);
+  computeWindow();
+  activationEpoch = clockOnDay(stageStartEpoch(stageIdx), afterDays, hour, minute);
+  if (durationDays) {
+    ownEndEpoch = activationEpoch + (uint32_t)durationDays * 86400u;
+    endEpoch = minEpoch(ownEndEpoch, stageEndEpoch(stageIdx));
+  }
 }
 
 //---

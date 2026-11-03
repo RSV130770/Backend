@@ -8,6 +8,7 @@
 #include "esp_netif_net_stack.h"   // esp_netif_get_netif_impl
 #include "lwip/etharp.h"
 #include "lwip/tcpip.h"
+#include <ESPmDNS.h>
 
 extern String wifiSSID;
 extern String wifiPass;
@@ -15,6 +16,7 @@ extern bool stationConnected;
 extern IPAddress IP;              // farm network (AP) address, .ino
 extern DNSServer dnsServer;
 extern bool loadWifiCredentials();
+extern String farmHostName();     // .ino: AP name as host name
 bool wifiScanBusy();              // site.cpp
 
 using namespace netplan;
@@ -241,10 +243,18 @@ void homeNetBegin() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   probeStart = autoStart(mac);
-  char name[24];
-  snprintf(name, sizeof(name), "premifarm-%02x%02x", mac[4], mac[5]);
-  hostName = name;
-  WiFi.setHostname(name);        // the router may list the farm by this name
+  // The farm's name on the home network comes from its AP name (Settings),
+  // e.g. "Premifarm-THS3-1" -> premifarm-ths3-1
+  hostName = farmHostName();
+  WiFi.setHostname(hostName.c_str());   // the router may list the farm by this name
+  // http://<name>.local/ on phones and PCs in the home network (and on the
+  // farm network); mDNS answers on every interface that comes up
+  if (MDNS.begin(hostName.c_str())) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("mDNS: http://%s.local/\n", hostName.c_str());
+  } else {
+    Serial.println("mDNS: could not start");
+  }
   homeNetRestart();
 }
 

@@ -27,6 +27,7 @@
 #define T_START 1
 #define T_PAUSE 2
 #define T_FROZEN 3
+#define T_FINISHED 4   // a last stage with a fixed length has ended
 extern uint32_t schedulerStartEpoch;
 extern uint32_t NOW_EPOCH;
 extern tm NOW;

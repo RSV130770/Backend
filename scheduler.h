@@ -9,6 +9,8 @@
 #include <time.h>
 void schedulerInit();
 void schedulerPause();
+bool schedulerSetStage(uint8_t stageId);   // make a stage active now
+int  schedulerStageIndex();                // current stage, -1 = none
 void schedulerRestorePause();   // after a reboot during a service pause
 void schedulerResume();
 void schedulerStop();

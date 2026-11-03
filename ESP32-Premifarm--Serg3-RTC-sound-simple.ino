@@ -40,7 +40,26 @@ DNSServer dnsServer;
 #define RTC_SCL 32
 #define RTC_SDA 26
 char decoded[32];
-char *ssid = "Premifarm-THS3-1";
+char *ssid = "Premifarm-THS3-1";   // factory AP name (printed on the box)
+// AP name in use: the Network Name (SSID) from the Settings page
+// (/ap_ssid.txt), or the factory name. The farm's name on the home network
+// is made from it (farmHostName).
+String apName = ssid;
+
+// The AP name as a network host name: lower case, letters, digits and "-"
+// ("Premifarm-THS3-1" -> "premifarm-ths3-1"). Used for the router's list
+// (DHCP) and for http://<name>.local/ (mDNS).
+String farmHostName() {
+  String h;
+  for (size_t i = 0; i < apName.length() && h.length() < 32; i++) {
+    char c = apName[i];
+    if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) h += c;
+    else if (h.length() && h[h.length() - 1] != '-') h += '-';
+  }
+  while (h.length() && h[h.length() - 1] == '-') h.remove(h.length() - 1);
+  return h.length() ? h : String("premifarm");
+}
 String password;
 
 String userName;
@@ -67,14 +86,48 @@ IPAddress IP(192, 168, 4, 1);
 //  WiFi credentials — SPIFFS /wifi.json
 // ─────────────────────────────────────────────────────────────────────────────
 
+void saveWifiCredentials(const String &ssid, const String &pass);
+
+// Older firmware kept the home network in /sta_ssid.txt and /sta_pass.txt
+// (written by the Settings page). Read them once and move them into
+// /wifi.json, the only place the home network code reads.
+static bool migrateOldWifiFiles() {
+  if (!SPIFFS.exists("/sta_ssid.txt")) return false;
+  String ssid, pass;
+  File f = SPIFFS.open("/sta_ssid.txt", "r");
+  if (f) { ssid = f.readStringUntil('\n'); ssid.trim(); f.close(); }
+  if (SPIFFS.exists("/sta_pass.txt")) {
+    f = SPIFFS.open("/sta_pass.txt", "r");
+    if (f) { pass = f.readStringUntil('\n'); f.close(); }
+  }
+  if (ssid.isEmpty()) return false;
+  saveWifiCredentials(ssid, pass);
+  SPIFFS.remove("/sta_ssid.txt");
+  SPIFFS.remove("/sta_pass.txt");
+  Serial.printf("WiFi: moved ssid='%s' from the old files\n", ssid.c_str());
+  return true;
+}
+
 bool loadWifiCredentials() {
-  File f = SPIFFS.open("/wifi.json", "r");
-  if (!f) { Serial.println("WiFi: no credentials file"); return false; }
+  // On the ESP32, opening a missing file does not fail: it returns an empty
+  // handle that looks like a directory. So check that the file exists.
+  File f;
+  if (SPIFFS.exists("/wifi.json")) f = SPIFFS.open("/wifi.json", "r");
+  if (!f || f.isDirectory()) {
+    if (migrateOldWifiFiles()) return loadWifiCredentials();
+    Serial.println("WiFi: no credentials file");
+    return false;
+  }
 
   StaticJsonDocument<256> doc;
-  if (deserializeJson(doc, f)) {
+  const size_t fsize = f.size();
+  DeserializationError err = deserializeJson(doc, f);
+  if (err) {
     f.close();
-    Serial.println("WiFi: credentials parse error");
+    Serial.printf("WiFi: credentials parse error (%s, file %u bytes)\n",
+                  err.c_str(), (unsigned)fsize);
+    SPIFFS.remove("/wifi.json");            // broken: do not read it again
+    if (migrateOldWifiFiles()) return loadWifiCredentials();
     return false;
   }
   f.close();
@@ -99,7 +152,8 @@ void saveWifiCredentials(const String &ssid, const String &pass) {
   if (!f) { Serial.println("WiFi: cannot save credentials"); return; }
   serializeJson(doc, f);
   f.close();
-  Serial.println("WiFi: credentials saved");
+  Serial.printf("WiFi: credentials saved, ssid='%s', password %u chars\n",
+                ssid.c_str(), (unsigned)pass.length());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,6 +201,49 @@ void p() {
 
 int pwmIndex = 0;
 
+// ---------------------------------------------------------------------------
+//  Network settings reset: hold PROG (GPIO0) for 10 s while running
+// ---------------------------------------------------------------------------
+// GPIO0 selects the boot mode only at power-up / reset; afterwards it is a
+// plain input with its own pull-up (R1). Held down for 10 s it sets the
+// network settings back to the factory values printed on the box:
+// AP "Premifarm-THS3-1" with password 1234567890, no home network, automatic
+// IP settings, AP address 192.168.4.1. Tasks, schedules and the clock stay.
+// 10 s (not less): when flashing, PROG is held only briefly before RESET.
+#define PROG_PIN 0
+static const unsigned long CRED_RESET_HOLD_MS = 10000;
+static const char *FACTORY_AP_PASS = "1234567890";
+
+void resetNetworkSettings() {
+  Serial.println("PROG held 10 s: network settings back to factory values");
+  const char *files[] = { "/wifi.json", "/sta_ssid.txt", "/sta_pass.txt",
+                          "/sta_ip.json", "/ap_ip.txt", "/ap_ssid.txt" };
+  for (const char *f : files) {
+    const bool had = SPIFFS.exists(f);
+    const bool removed = had && SPIFFS.remove(f);
+    Serial.printf("  %s: %s\n", f, !had ? "not there" : removed ? "removed" : "REMOVE FAILED");
+  }
+  writeFile(SPIFFS, "/pass.txt", FACTORY_AP_PASS);
+  p();                       // sound: done
+  delay(500);
+  ESP.restart();
+}
+
+// Called from loop(): counts how long PROG is held down
+void checkProgButton() {
+  static unsigned long downSince = 0;
+  static bool down = false, fired = false;
+  if (digitalRead(PROG_PIN) == LOW) {
+    if (!down) { down = true; fired = false; downSince = millis(); }
+    else if (!fired && millis() - downSince >= CRED_RESET_HOLD_MS) {
+      fired = true;          // once per press
+      resetNetworkSettings();
+    }
+  } else {
+    down = false;
+  }
+}
+
 void restartServer() {
   dnsServer.stop();
   WiFi.disconnect(true);
@@ -156,7 +253,7 @@ void restartServer() {
   WiFi.mode(WIFI_AP);
   delay(50);
   WiFi.softAPConfig(IP, IP, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(ssid);
+  WiFi.softAP(apName.c_str());
   delay(100);
   Serial.println("Setting soft-AP configuration ...");
   if (!dnsServer.start(53, "*", IP)) Serial.println("DNS fail");
@@ -297,6 +394,7 @@ void everySecond() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("Firmware: stages + wifi fix + PROG reset, 2026-11-03");
 
   if (!SPIFFS.begin(true)) {
     Serial.println("An Error has occurred while mounting SPIFFS");
@@ -312,6 +410,17 @@ void setup() {
   defaultPassword = readFile(SPIFFS, "/pass.txt");
   idString        = readFile(SPIFFS, "/register.txt");
 
+  // AP name from the Settings page, else the factory name
+  if (SPIFFS.exists("/ap_ssid.txt")) {
+    File f = SPIFFS.open("/ap_ssid.txt", "r");
+    if (f && !f.isDirectory()) {
+      String n = f.readStringUntil('\n');
+      n.trim();
+      if (n.length() > 0 && n.length() <= 32) apName = n;
+    }
+    if (f) f.close();
+  }
+
   // Start Access Point (its address may have been moved out of the home
   // network's range before: homenet.cpp)
   IP = homeNetLoadApIp();
@@ -319,13 +428,13 @@ void setup() {
   WiFi.softAPConfig(IP, IP, IPAddress(255, 255, 255, 0));
   // Use password from /pass.txt if >= 8 chars, otherwise open network
   if (defaultPassword.length() >= 8)
-    WiFi.softAP(ssid, defaultPassword.c_str());
+    WiFi.softAP(apName.c_str(), defaultPassword.c_str());
   else
-    WiFi.softAP(ssid);
+    WiFi.softAP(apName.c_str());
   delay(100);
   if (!dnsServer.start(53, "*", IP))
     Serial.println("DNS fail");
-  Serial.printf("AP started: '%s'  IP: %s\n", ssid, WiFi.softAPIP().toString().c_str());
+  Serial.printf("AP started: '%s'  IP: %s\n", apName.c_str(), WiFi.softAPIP().toString().c_str());
 
   newSession();
   handleSite();   // register all endpoints including /wifi/*
@@ -349,6 +458,7 @@ void setup() {
 
   delay(100);
   pinMode(SDPIN, OUTPUT);
+  pinMode(PROG_PIN, INPUT_PULLUP);   // PROG button (external pull-up R1 too)
   setup_sound();
   p();
 }
@@ -357,5 +467,6 @@ void loop() {
   dnsServer.processNextRequest();
   tickWifiScan();   // completes async scan and updates cache without blocking
   homeNetLoop();    // joins / watches the home network in the background
+  checkProgButton();  // PROG held 10 s: network settings to factory values
   delay(1);
 }

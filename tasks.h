@@ -34,6 +34,7 @@ void handlePresetStart(AsyncWebServerRequest *req, uint8_t *data, size_t len);
 void handlePresetStop(AsyncWebServerRequest *req);
 void handlePresetPause(AsyncWebServerRequest *req);
 void handlePresetResume(AsyncWebServerRequest *req);
+void handlePresetStage(AsyncWebServerRequest *req, uint8_t *data, size_t len);
 void handleApiState(AsyncWebServerRequest *req);
 String formatStartTime();
 String taskStatusToString();

@@ -22,6 +22,29 @@ enum EventType {
   EVENT_FREEZE
 };
 extern uint32_t freezeEntryEpoch;  // when freeze began
+
+// --
+// Stages of the running preset (built by buildEventsFromPreset)
+// --
+// Stages run one after another. A stage starts at the task start plus the
+// lengths of the stages before it (offsetMin). Length 0 = open-ended: it
+// runs until Stop and can only be the last stage.
+struct StageInfo {
+  uint8_t  id = 0;          // id from the preset file
+  String   name;
+  uint32_t offsetMin = 0;   // minutes from the task start
+  uint32_t lenMin = 0;      // minutes, 0 = open-ended
+  bool     endPause = false;  // wait for Continue at its end
+  String   message;         // shown while waiting
+};
+extern std::vector<StageInfo> STAGES;
+
+uint32_t stageStartEpoch(uint8_t idx);
+uint32_t stageEndEpoch(uint8_t idx);       // UINT32_MAX when open-ended
+int stageIndexById(uint8_t id);            // -1 when the preset has no such stage
+// Local midnight "days" calendar days after the day of "epoch"
+uint32_t dayMidnight(uint32_t epoch, int days);
+
 class MachineEvent {
 public:
   EventType type = EVENT_DAILY;
@@ -31,12 +54,23 @@ public:
   uint8_t duty = 0;
   uint8_t hour = 0;
   uint8_t minute = 0;
-  uint8_t afterDays = 0;
+  uint8_t afterDays = 0;     // day of its stage (0 = the stage's first day)
+  uint8_t stageIdx = 0;      // index into STAGES
   bool enabled = true;
   String message;   // Message output: the text; pause point: its text
   bool done = false; // once event: applied (or overridden by a later one)
 
   uint32_t activationEpoch = 0;  // cached activation time
+  // Window inside its stage, set by computeActivation():
+  uint32_t beginEpoch = 0;            // not in effect before this
+  uint32_t ownEndEpoch = UINT32_MAX;  // its own "expireAfterDays"
+  uint32_t endEpoch = UINT32_MAX;     // own end, cut at its stage end
+
+  // Time from which the event may act: its activation, but not before
+  // its stage (or its day of the stage) begins
+  uint32_t effectiveFrom() const {
+    return activationEpoch > beginEpoch ? activationEpoch : beginEpoch;
+  }
 
   virtual ~MachineEvent() = default;
 
@@ -46,15 +80,13 @@ public:
   // Direct application of event state
   virtual void applyTo() = 0;
 
-  // Compute activation time (Once + Custom use this directly)
-  virtual void computeActivation() {
-    activationEpoch =
-      schedulerStartEpoch + afterDays * 86400u + hour * 3600u + minute * 60u;
-  }
-  virtual bool isExpired() const {
-    if (durationDays == 0) return false;
-    return NOW_EPOCH > activationEpoch + (uint32_t)durationDays * 86400u;
-  }
+  // Compute activation time and window; each event type overrides it
+  virtual void computeActivation() { computeWindow(); }
+  // Begin and end inside its stage
+  void computeWindow();
+  // Ended: past its own end or its stage end. While the task waits at the
+  // end of this event's stage, the stage end does not count.
+  bool isExpired() const;
   virtual void ToNextSwitch() const;
   virtual void toJson(JsonObject &o) const;
   virtual bool fromJson(const JsonObject &o);
@@ -91,9 +123,6 @@ public:
 
   // Move activation to the next HH:MM after now, without applying
   void advanceToNext();
-
-  // A daily group with a duration ends at midnight after its last day
-  bool isExpired() const override;
 };
 
 // --
@@ -175,7 +204,7 @@ public:
 // the user presses Continue. "message" is shown on the dashboard meanwhile.
 class FreezeEvent : public MachineEvent {
 public:
-  uint8_t seq = 0;   // order among the task's pause points (0, 1, ...)
+  uint8_t seq = 0;   // index of its stage (FREEZE_DONE counts confirmed ones)
 
   FreezeEvent() {
     type = EVENT_FREEZE;
@@ -187,9 +216,11 @@ public:
     if (TASK_STATUS != T_FROZEN)
       TASK_STATUS = T_FROZEN;
   }
-  // Clock time HH:MM on the task's day "afterDays", like a once event
+  // At the end of its stage (made from the stage's endPause)
   void computeActivation() override {
-    activationEpoch = clockTimeOnTaskDay(afterDays, hour, minute);
+    computeWindow();
+    activationEpoch = stageEndEpoch(stageIdx);
+    beginEpoch = activationEpoch;
   }
   void toJson(JsonObject &o) const override;
   bool fromJson(const JsonObject &o) override;

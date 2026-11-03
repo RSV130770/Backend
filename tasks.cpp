@@ -9,9 +9,10 @@ extern AsyncWebServer server;
 // session owner; otherwise it has already answered 403.
 bool requireSession(AsyncWebServerRequest *req);
 
-// Room for a preset file in RAM. A schedule made in the web editor has
-// roughly 400 bytes per event, so this covers about 60 events.
-static const size_t PRESET_DOC_SIZE = 24576;
+// Room for a preset file in RAM. A schedule made in the web editor needs
+// roughly 500 bytes per event once parsed; the five-stage Default (42
+// events) needs about 22 KB, so this leaves room for larger presets.
+static const size_t PRESET_DOC_SIZE = 32768;
 
 // Largest POST body accepted (a preset with its schedule)
 static const size_t MAX_BODY_SIZE = 16384;
@@ -24,55 +25,121 @@ static const size_t MAX_BODY_SIZE = 16384;
 // creates a new preset from it.
 // =========================================================
 
-static const char *TPL_LIGHT_ON   = "06:30";
-static const char *TPL_LIGHT_OFF  = "22:30";
-static const uint8_t TPL_LIGHT_PCT = 50;       // all lights, percent
-static const uint32_t TPL_LIGHT_RAMP_MS = 120000;  // 2 min up and down
-static const uint32_t TPL_PUMP_ON_SEC  = 10;       // pump runs 10 s ...
-static const uint32_t TPL_PUMP_OFF_SEC = 60 * 60;  // ... then rests 60 min
+// Five stages: Germination 4 d (freeze at the end), Seedling 7 d, Growth
+// 21 d, Flowering 28 d (freeze at the end), Finishing (open-ended). Every
+// duty value is 50 %; pump and mist are on/off. The stages also serve as
+// the stage library (later: "Add stage from preset").
+static const uint8_t  TPL_PCT     = 50;        // lights, UV, far-red, fan
+static const uint32_t TPL_RAMP_MS = 120000;    // 2 min up and down
 
-// One event in the web editor's format (see MachineEvent::fromJson)
-static JsonObject addTemplateEvent(JsonArray arr, uint8_t group, const char *groupName, uint8_t ch,
-                                   const char *repeat, const char *time,
-                                   uint8_t pct, uint32_t riseMs, uint32_t fallMs) {
+// One event in the web editor's format (see MachineEvent::fromJson).
+// Values are numbers or string literals, so the document stores no copies.
+static JsonObject tplEvent(JsonArray arr, uint8_t stage, uint8_t group,
+                           const char *groupName, uint8_t ch, const char *repeat,
+                           const char *time, uint8_t pct, uint32_t riseMs,
+                           uint32_t fallMs, uint32_t onSec, uint32_t offSec) {
   JsonObject e = arr.createNestedObject();
+  e["stageId"]         = stage;
   e["groupId"]         = group;
   e["groupName"]       = groupName;   // shown in the web editor, ignored here
   e["channelId"]       = ch;
-  e["time"]            = time;
-  e["afterDays"]       = 0;      // starts on the day the preset is started
-  e["expireAfterDays"] = 0;      // never expires
   e["repeat"]          = repeat;
+  e["time"]            = time;
+  e["afterDays"]       = 0;           // from the stage's first day
+  e["expireAfterDays"] = 0;           // until the stage ends
   e["duty"]            = pct;
   e["rise"]            = riseMs;
   e["fall"]            = fallMs;
-  e["on"]              = 0;
-  e["off"]             = 0;
+  e["on"]              = onSec;
+  e["off"]             = offSec;
   e["enabled"]         = true;
   return e;
 }
 
+// Lights of a group: daily on at onTime, off at offTime, with ramps
+static void tplLights(JsonArray s, uint8_t stage, uint8_t &group, const char *name,
+                      const uint8_t *chans, size_t n, const char *onTime, const char *offTime) {
+  group++;
+  for (size_t i = 0; i < n; i++) {
+    tplEvent(s, stage, group, name, chans[i], "daily", onTime,  TPL_PCT, TPL_RAMP_MS, TPL_RAMP_MS, 0, 0);
+    tplEvent(s, stage, group, name, chans[i], "daily", offTime, 0,       TPL_RAMP_MS, TPL_RAMP_MS, 0, 0);
+  }
+}
+
+// A cycle from the stage start ("--:--"): on for onSec, then off for offSec
+static void tplCycle(JsonArray s, uint8_t stage, uint8_t &group, const char *name,
+                     uint8_t ch, uint32_t onSec, uint32_t offSec) {
+  tplEvent(s, stage, ++group, name, ch, "custom", "--:--", 100,
+           ch == ID_PUMP ? 500 : 0, 0, onSec, offSec);
+}
+
+// A steady level for the whole stage (once at 00:00 of day 0 = stage start)
+static void tplSteady(JsonArray s, uint8_t stage, uint8_t &group, const char *name, uint8_t ch) {
+  tplEvent(s, stage, ++group, name, ch, "once", "00:00", TPL_PCT, TPL_RAMP_MS, 0, 0, 0);
+}
+
+static void tplStage(JsonArray st, uint8_t id, const char *name, uint8_t days,
+                     bool endPause, const char *message) {
+  JsonObject o = st.createNestedObject();
+  o["id"]       = id;
+  o["name"]     = name;
+  o["days"]     = days;
+  o["hours"]    = 0;
+  o["endPause"] = endPause;
+  o["message"]  = message;
+}
+
 static String buildTemplateJson() {
-  DynamicJsonDocument doc(8192);
+  DynamicJsonDocument doc(PRESET_DOC_SIZE);
   doc["id"]      = 0;
   doc["name"]    = "Default";
   doc["builtIn"] = true;
+
+  JsonArray st = doc.createNestedArray("stages");
+  tplStage(st, 1, "Germination", 4,  true,  "Remove the covers");
+  tplStage(st, 2, "Seedling",    7,  false, "");
+  tplStage(st, 3, "Growth",      21, false, "");
+  tplStage(st, 4, "Flowering",   28, true,  "Check the plants before finishing");
+  tplStage(st, 5, "Finishing",   0,  false, "");
+
   JsonArray s = doc.createNestedArray("schedule");
+  uint8_t g = 0;
+  const uint8_t wbr[] = { ID_WHITE, ID_BLUE, ID_RED };
+  const uint8_t wrb[] = { ID_WHITE, ID_RED, ID_BLUE };
+  const uint8_t all[] = { ID_WHITE, ID_RED, ID_BLUE, ID_UV, ID_FARR };
 
-  // Group 1: all lights, daily on/off with a ramp
-  const uint8_t lights[] = { ID_WHITE, ID_RED, ID_BLUE, ID_UV, ID_FARR };
-  for (uint8_t ch : lights) {
-    addTemplateEvent(s, 1, "Light", ch, "daily", TPL_LIGHT_ON,  TPL_LIGHT_PCT,
-                     TPL_LIGHT_RAMP_MS, TPL_LIGHT_RAMP_MS);
-    addTemplateEvent(s, 1, "Light", ch, "daily", TPL_LIGHT_OFF, 0,
-                     TPL_LIGHT_RAMP_MS, TPL_LIGHT_RAMP_MS);
-  }
+  // 1 Germination: dark; pump 10 s / 60 min, mist 30 s / 30 min
+  tplCycle(s, 1, g, "Pump", ID_PUMP, 10, 3600);
+  tplCycle(s, 1, g, "Mist", ID_MIST, 30, 1800);
 
-  // Group 2: pump cycle, starts as soon as the preset starts ("--:--")
-  JsonObject p = addTemplateEvent(s, 2, "Pump", ID_PUMP, "custom", "--:--", 100, 0, 0);
-  p["on"]  = TPL_PUMP_ON_SEC;
-  p["off"] = TPL_PUMP_OFF_SEC;
+  // 2 Seedling: 16 h light; pump 10 s / 60 min; fan
+  tplLights(s, 2, g, "Light", wbr, 3, "06:00", "22:00");
+  tplCycle(s, 2, g, "Pump", ID_PUMP, 10, 3600);
+  tplSteady(s, 2, g, "Fan", ID_FAN);
 
+  // 3 Growth: 16 h light, UV 10:00-12:00; pump 10 s / 45 min; fan
+  tplLights(s, 3, g, "Light", wbr, 3, "06:00", "22:00");
+  const uint8_t uv[] = { ID_UV };
+  tplLights(s, 3, g, "UV", uv, 1, "10:00", "12:00");
+  tplCycle(s, 3, g, "Pump", ID_PUMP, 10, 2700);
+  tplSteady(s, 3, g, "Fan", ID_FAN);
+
+  // 4 Flowering: 12 h light, far-red 20:00-20:15; pump 10 s / 45 min; fan
+  tplLights(s, 4, g, "Light", wrb, 3, "08:00", "20:00");
+  const uint8_t fr[] = { ID_FARR };
+  tplLights(s, 4, g, "Far-red", fr, 1, "20:00", "20:15");
+  tplCycle(s, 4, g, "Pump", ID_PUMP, 10, 2700);
+  tplSteady(s, 4, g, "Fan", ID_FAN);
+
+  // 5 Finishing (open-ended): all lights 06:30-22:30; pump 10 s / 60 min;
+  // the harvest message on day 0 at 09:00 (its sound comes with the Sound
+  // output)
+  tplLights(s, 5, g, "Light", all, 5, "06:30", "22:30");
+  tplCycle(s, 5, g, "Pump", ID_PUMP, 10, 3600);
+  JsonObject m = tplEvent(s, 5, ++g, "Harvest", ID_MESSAGE, "once", "09:00", 100, 0, 0, 0, 0);
+  m["message"] = "Ready to harvest";
+
+  if (doc.overflowed()) Serial.println("buildTemplateJson: document too small");
   String out;
   serializeJson(doc, out);
   return out;
@@ -142,6 +209,7 @@ String taskStatusToString() {
     case T_START:  return "running";
     case T_PAUSE:  return "paused";
     case T_FROZEN: return "frozen";
+    case T_FINISHED: return "finished";
     case T_STOP:
     default:       return "stopped";
   }
@@ -448,7 +516,8 @@ void handlePresetSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
 
   // The preset that is running now was edited: apply the new schedule
   // right away, keeping its start time
-  if (id == PRESET_ID && TASK_STATUS != T_STOP) {
+  if (id == PRESET_ID && (TASK_STATUS == T_START || TASK_STATUS == T_PAUSE ||
+                          TASK_STATUS == T_FROZEN)) {
     uint8_t status = TASK_STATUS;
     if (!continuePreset(id, status))
       Serial.println("handlePresetSave: could not reload running preset");
@@ -518,9 +587,13 @@ void handlePresetSelect(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   }
   uint8_t id = doc["id"] | 0;
 
-  if (TASK_STATUS != T_STOP) {
+  if (TASK_STATUS != T_STOP && TASK_STATUS != T_FINISHED) {
     sendError(req, 409, "stop the running preset first");
     return;
+  }
+  if (TASK_STATUS == T_FINISHED) {       // a finished task: back to stopped
+    TASK_STATUS = T_STOP;
+    ClearStartTimeInRtc();
   }
   char path[32];
   presetPath(id, path, sizeof(path));
@@ -553,6 +626,7 @@ void handlePresetStart(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   }
 
   uint8_t id = doc["id"] | 0;
+  int stageId = doc["stageId"] | -1;     // optional: start at this stage
 
   if (TASK_STATUS != T_STOP) schedulerStop();
 
@@ -560,6 +634,8 @@ void handlePresetStart(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     sendError(req, 404, "preset not found");
     return;
   }
+  if (stageId >= 0 && !schedulerSetStage((uint8_t)stageId))
+    Serial.printf("handlePresetStart: no stage %d, started at stage 1\n", stageId);
 
   StaticJsonDocument<1024> resp;
   resp["status"]    = taskStatusToString();
@@ -618,6 +694,33 @@ void handlePresetResume(AsyncWebServerRequest *req) {
   }
 
   schedulerResume();
+
+  StaticJsonDocument<1024> resp;
+  resp["status"]    = taskStatusToString();
+  resp["startTime"] = formatStartTime();
+  fillDashboardState(resp);
+
+  String out;
+  serializeJson(resp, out);
+  req->send(200, "application/json", out);
+}
+
+// Make a stage of the running task active now: {"stageId": 2}
+void handlePresetStage(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
+  StaticJsonDocument<64> doc;
+  if (deserializeJson(doc, data, len)) {
+    sendError(req, 400, "invalid json");
+    return;
+  }
+  if (TASK_STATUS != T_START && TASK_STATUS != T_PAUSE && TASK_STATUS != T_FROZEN) {
+    sendError(req, 409, "no task running");
+    return;
+  }
+  int stageId = doc["stageId"] | -1;
+  if (stageId < 0 || !schedulerSetStage((uint8_t)stageId)) {
+    sendError(req, 404, "stage not found");
+    return;
+  }
 
   StaticJsonDocument<1024> resp;
   resp["status"]    = taskStatusToString();
@@ -710,11 +813,35 @@ void handlePresetList(AsyncWebServerRequest *req) {
                 count, (unsigned long)(millis() - t0), ESP.getFreeHeap());
 }
 
+// Current stage and the stage list, while a task is running, paused or
+// waiting at a stage end
+static void fillStageState(JsonDocument &resp) {
+  if (TASK_STATUS != T_START && TASK_STATUS != T_PAUSE && TASK_STATUS != T_FROZEN) return;
+  const int idx = schedulerStageIndex();
+  if (idx < 0) return;
+  const StageInfo &st = STAGES[idx];
+  JsonObject s = resp.createNestedObject("stage");
+  s["id"]    = st.id;
+  s["index"] = idx;
+  s["count"] = STAGES.size();
+  s["name"]  = st.name.c_str();
+  const uint32_t start = stageStartEpoch((uint8_t)idx);
+  s["elapsedMin"] = NOW_EPOCH > start ? (NOW_EPOCH - start) / 60u : 0;
+  s["lengthMin"]  = st.lenMin;
+  JsonArray list = resp.createNestedArray("stages");
+  for (const StageInfo &x : STAGES) {
+    JsonObject o = list.createNestedObject();
+    o["id"]   = x.id;
+    o["name"] = x.name.c_str();
+  }
+}
+
 void handleApiState(AsyncWebServerRequest *req) {
-  DynamicJsonDocument resp(1536);   // 10 outputs + sensors + messages
+  DynamicJsonDocument resp(2560);   // 10 outputs + sensors + messages + stages
   fillDashboardState(resp);
   // Task status for the page, and the message of a reached pause point
   resp["taskStatus"] = taskStatusToString();
+  fillStageState(resp);
   if (TASK_STATUS == T_FROZEN && activeFreeze)
     resp["pauseMessage"] = activeFreeze->message;
   // Text of the Message output (confirmed with OK on the dashboard)
@@ -789,6 +916,17 @@ void setupTasks() {
       if (!body) return;
       if (!requireSession(req)) return;
       handlePresetStart(req, body, total);
+    });
+
+  server.on("/preset/stage", HTTP_POST,
+    [](AsyncWebServerRequest *req) {},
+    nullptr,
+    [](AsyncWebServerRequest *req, uint8_t *data, size_t len,
+       size_t index, size_t total) {
+      uint8_t *body = collectBody(req, data, len, index, total);
+      if (!body) return;
+      if (!requireSession(req)) return;
+      handlePresetStage(req, body, total);
     });
 
   server.on("/preset/pause", HTTP_POST,
