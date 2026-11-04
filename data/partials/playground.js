@@ -17,6 +17,7 @@ function buildPlayground() {
 
   outputsConfig.forEach(o => {
     if (o.mode === "message") return;   // virtual output, nothing to drive
+    if (o.mode === "sound") { container.append(buildSoundCard(o)); return; }
 
     const hasParams = o.mode !== "no_ramp"; // Debug NO_RAMP has no collapse
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
@@ -112,6 +113,17 @@ function buildPlayground() {
 
 function bindPlaygroundEvents() {
 
+// Sound card: volume label, Play
+$(".play-sound-volume").on("input", function () {
+  $(`#play-sound-vol-${$(this).data("id")}`).text(this.value + " %");
+});
+$(".play-sound-btn").on("click", function () {
+  const id = $(this).data("id");
+  const file = $(`#play-sound-file-${id}`).val();
+  const volume = parseInt($(`.play-sound-volume[data-id=${id}]`).val()) || 50;
+  playSoundNow(id, file, volume);
+});
+
 // Collapse on label click
 $(".play-header, .play-label").on("click", function (e) {
   if ($(e.target).closest(".play-control").length) return;
@@ -122,8 +134,8 @@ if ($(e.target).closest(".play-btn").length) return;
   if (target) $(target).collapse("toggle");
 });
 
-// ON / OFF buttons
-$(".play-btn").on("click", function () {
+// ON / OFF buttons (the Sound card has its own Play button)
+$(".play-btn").not(".play-sound-btn").on("click", function () {
   const id = $(this).data("id");
   const action = $(this).data("action");
 
@@ -153,7 +165,7 @@ $(".play-btn").on("click", function () {
 
 
 // Slider → direct analog control, cancels ramping
-$(".play-slider").on("input", function () {
+$(".play-slider").not(".play-sound-volume").on("input", function () {
   const id = $(this).data("id");
   const sliderVal = parseInt($(this).val()) || 0;
 
@@ -251,3 +263,84 @@ function sendPlaygroundParams(id, rise, fall, ontime, offtime) {
   });
 }
 
+
+
+/* ============================================================
+   SOUND OUTPUT
+   ============================================================ */
+// Sound files on the controller (GET /api/sounds), loaded once and shared
+// with the schedule editor. done(list) gets the names, e.g. "stage.wav".
+let soundFiles = null;
+function loadSoundFiles(done) {
+  if (soundFiles) { done(soundFiles); return; }
+  if (OFFLINE_MODE) { soundFiles = ["stage.wav", "warning.wav"]; done(soundFiles); return; }
+  $.ajax({ url: "/api/sounds", dataType: "json", timeout: 5000 })
+    .done(d => { soundFiles = (d.sounds || []).slice().sort(); done(soundFiles); })
+    .fail(() => done([]));     // not cached: the next dialog asks again
+}
+
+// Fill a <select> with the sound files; a file named by an event but no
+// longer on the controller stays selectable, marked "missing"
+function fillSoundSelect($sel, selected) {
+  $sel.html('<option value="">Loading...</option>');
+  loadSoundFiles(list => {
+    const names = list.slice();
+    if (selected && !names.includes(selected)) names.unshift(selected);
+    $sel.empty();
+    if (!names.length) $sel.append('<option value="">No .wav files</option>');
+    else if (!selected) $sel.append('<option value="">Choose a sound</option>');
+    names.forEach(n => {
+      const missing = !list.includes(n) ? " (missing)" : "";
+      $sel.append($("<option>").val(n).text(n + missing));
+    });
+    $sel.val(selected || "");
+  });
+}
+
+function buildSoundCard(o) {
+  const invertStyle = o.invert ? "filter: invert(100%);" : "";
+  const $card = $(`
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+          <div class="pic" style="${o.style}">
+            <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
+          </div>
+          <strong>${o.label}</strong>
+        </div>
+        <div class="play-controls d-flex">
+          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="Play">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 3.3v9.4L12 8 4 3.3z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="card-body pt-2 pb-2">
+        <select class="form-control mb-2" id="play-sound-file-${o.id}"></select>
+        <div class="d-flex align-items-center">
+          <input type="range" min="1" max="100" value="50"
+                 class="play-slider play-sound-volume form-range flex-grow-1" data-id="${o.id}">
+          <span class="ml-2 text-nowrap" id="play-sound-vol-${o.id}">50 %</span>
+        </div>
+        <div class="text-danger small mt-1 d-none" id="play-sound-err-${o.id}"></div>
+      </div>
+    </div>`);
+  fillSoundSelect($card.find("select"), "");
+  return $card;
+}
+
+function playSoundNow(id, file, volume) {
+  const $err = $(`#play-sound-err-${id}`).addClass("d-none");
+  if (!file) { $err.text("Choose a sound first.").removeClass("d-none"); return; }
+  const $btn = $(`.play-sound-btn[data-id=${id}]`).addClass("play-active");
+  setTimeout(() => $btn.removeClass("play-active"), 600);
+  if (OFFLINE_MODE) return;
+  $.ajax({
+    url: "/playground/sound",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ file, volume }),
+    error: () => $err.text("The controller could not play " + file + ".").removeClass("d-none")
+  });
+}

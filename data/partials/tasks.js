@@ -223,7 +223,7 @@ function buildDashboard() {
   container.innerHTML = "";
 
   outputsConfig.forEach(o => {
-    if (o.mode === "message") return;   // shown as a banner, not a card
+    if (o.mode === "message" || o.mode === "sound") return;   // virtual: no card
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
 
     container.insertAdjacentHTML("beforeend", `
