@@ -357,6 +357,7 @@ bool schedulerSetStage(uint8_t stageId) {
   FREEZE_DONE  = (uint8_t)idx;          // re-arm the pauses from this stage on
   activeFreeze = nullptr;
   setPauseStart(0);
+  PAUSE_SOURCE = PAUSE_SRC_NONE;
   TASK_STATUS  = T_START;
   saveTaskData();
 
@@ -392,7 +393,10 @@ void schedulerStartAt(uint32_t startEpoch, bool recovering) {
     PutStartTimetoRtc(startTm);           // also saves FROZEN_DAYS = 0
   }
   FROZEN_DAYS = 0;
-  if (!recovering) setPauseStart(0);    // a new run has no pause behind it
+  if (!recovering) {                    // a new run has no pause behind it
+    setPauseStart(0);
+    PAUSE_SOURCE = PAUSE_SRC_NONE;
+  }
   saveTaskData();                       // a stale FROZEN_DAYS must not survive
   schedulerStartEpoch = startEpoch;
   computeAllActivationTimes();
@@ -408,15 +412,34 @@ void schedulerStartAt(uint32_t startEpoch, bool recovering) {
 // Service pause: the schedule stops and every physical output goes off
 // (Playground may still drive them by hand). The pause start is kept in RTC
 // memory, so the days paused are counted right after a reboot too.
+// The source tells who paused: a Dashboard pause lasts until the user
+// resumes, a Playground pause ends by itself when nobody controls the farm.
 void schedulerPause() {
+  schedulerPause(PAUSE_SRC_DASHBOARD);
+}
+
+void schedulerPause(uint8_t source) {
   if (TASK_STATUS != T_START) return;
   schedulerTicker.detach();
   updateNow();
   TASK_STATUS = T_PAUSE;
   setPauseStart(NOW_EPOCH);
+  PAUSE_SOURCE = source;
   saveTaskData();
   physicalOutputsOff();
-  Serial.println("Scheduler paused, outputs off");
+  Serial.printf("Scheduler paused (%s), outputs off\n",
+                source == PAUSE_SRC_PLAYGROUND ? "Playground" : "Dashboard");
+}
+
+// A pause made by Playground must not outlive the user who made it: when
+// the session is gone (Leave, page closed, idle timeout, reboot) the task
+// continues. Call from loop() while no session is active.
+// Returns true when the task was resumed (the caller plays the warning).
+bool schedulerAutoResume() {
+  if (TASK_STATUS != T_PAUSE || PAUSE_SOURCE != PAUSE_SRC_PLAYGROUND) return false;
+  Serial.println("Playground pause: nobody in control, task continues");
+  schedulerResume();
+  return true;
 }
 
 // After a reboot during a service pause: the preset was rebuilt and its
@@ -452,6 +475,7 @@ void schedulerResume() {
     shiftStartByWholeDays(getPauseStart(), "Service pause");
   }
   setPauseStart(0);
+  PAUSE_SOURCE = PAUSE_SRC_NONE;
   if (wasWaiting) {
     // This pause point is confirmed; a reboot must not ask again
     FREEZE_DONE = activeFreeze ? activeFreeze->seq + 1 : FREEZE_DONE + 1;

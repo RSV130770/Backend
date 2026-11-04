@@ -29,7 +29,9 @@ extern String readFile(fs::FS &fs, const char *path);
 extern String sessionToken;
 extern unsigned long lastActivityMs;
 
-static const unsigned long SESSION_TIMEOUT_MS = 5UL * 60UL * 1000UL; // 5 min
+// Demonstration setting: a user who taps nothing for 1 min hands the farm
+// over to the next one (and a Playground pause ends).
+static const unsigned long SESSION_TIMEOUT_MS = 60UL * 1000UL; // 1 min
 
 // ── Globals owned by .ino ─────────────────────────────────────────────────────
 extern String defaultPassword;    // loaded from /pass.txt → used for softAP WPA2

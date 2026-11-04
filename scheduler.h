@@ -8,7 +8,9 @@
 #include "tasks.h"
 #include <time.h>
 void schedulerInit();
-void schedulerPause();
+void schedulerPause();                  // from the Dashboard
+void schedulerPause(uint8_t source);    // source: PAUSE_SRC_*
+bool schedulerAutoResume();     // Playground pause with no user: continue
 bool schedulerSetStage(uint8_t stageId);   // make a stage active now
 int  schedulerStageIndex();                // current stage, -1 = none
 void schedulerRestorePause();   // after a reboot during a service pause

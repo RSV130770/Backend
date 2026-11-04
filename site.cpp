@@ -12,7 +12,14 @@
 #endif
 
 unsigned long lastSeenMs = 0;   // millis() of the last request from the owner page
-static const unsigned long SESSION_GONE_MS = 90000;  // owner silent this long -> page closed
+// Owner page silent this long -> page closed or phone gone. A live page
+// checks in every 15 s, so 35 s means two missed checks.
+static const unsigned long SESSION_GONE_MS = 35000;
+
+// Token of the session that last ended by the idle timeout. Its page is told
+// "expired" (shows "Session ended") instead of silently reloading, which
+// would just take the farm again.
+static String expiredToken = "";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Session state
@@ -77,21 +84,24 @@ bool sessionFree() {
   return sessionToken.length() == 0;
 }
 
-bool isAuthorized(AsyncWebServerRequest *req) {
-   if (sessionFree()) return false;
-  if (!req->hasHeader("Cookie")) return false;
-
+// The session token the request carries in its cookie, "" if none
+static String cookieToken(AsyncWebServerRequest *req) {
+  if (!req->hasHeader("Cookie")) return "";
   String cookie = req->header("Cookie");
   int start = cookie.indexOf("session=");
-  if (start == -1) return false;
+  if (start == -1) return "";
   start += 8;
   int end = cookie.indexOf(";", start);
   String token = (end == -1) ? cookie.substring(start)
                               : cookie.substring(start, end);
   token.trim();
+  return token;
+}
 
-//  return token == sessionToken;
- if (token != sessionToken) return false;
+bool isAuthorized(AsyncWebServerRequest *req) {
+  if (sessionFree()) return false;
+  String token = cookieToken(req);
+  if (token.length() == 0 || token != sessionToken) return false;
   lastSeenMs = millis();        // the owner page is still there
   return true;
 }
@@ -130,13 +140,12 @@ void releaseSession() {
 }
 
 // Called every second (from Ticker / loop).
-// Drops a claim the page never confirmed, and expires the session after
-// SESSION_TIMEOUT_MS of inactivity.
-// Called every second (from Ticker / loop).
 // - drops a claim the page never confirmed (10 s),
-// - frees the session when the owner page went silent (90 s): the window was
-//   closed without Leave or the phone sleeps (a live page checks in every 15 s),
+// - frees the session when the owner page went silent (35 s): the window was
+//   closed without Leave, the phone sleeps or left the network (a live page
+//   checks in every 15 s),
 // - frees it after SESSION_TIMEOUT_MS without user actions.
+// A Playground pause then ends by itself: see schedulerAutoResume() in loop().
 void tickSession() {
   if (sessionFree()) return;
   if (!sessionConfirmed && millis() - sessionClaimedMs >= SESSION_CONFIRM_MS) {
@@ -145,13 +154,14 @@ void tickSession() {
     return;
   }
   if (sessionConfirmed && millis() - lastSeenMs >= SESSION_GONE_MS) {
-    Serial.println("Owner page silent for 90 s - session released");
+    Serial.println("Owner page silent for 35 s - session released");
     releaseSession();
     return;
   }
   unsigned long idle = millis() - lastActivityMs;
   if (idle >= SESSION_TIMEOUT_MS) {
     Serial.printf("Session timed out after %lu ms idle\n", idle);
+    expiredToken = sessionToken;   // that page shows "Session ended"
     releaseSession();
   }
 }
@@ -201,25 +211,23 @@ static const char BUSY_HTML[] PROGMEM = R"rawliteral(
         box-shadow:0 4px 24px rgba(0,0,0,.10);
         padding:2rem;width:min(320px,90vw);text-align:center;}
   h2{font-size:1.1rem;color:#1a1a2e;margin:.5rem 0 1.25rem;}
-  .icon{font-size:2.5rem;margin-bottom:.5rem;}
-  #timer{font-size:2rem;font-weight:700;color:#007bff;font-variant-numeric:tabular-nums;}
+  .spin{width:48px;height:48px;margin:0 auto;border:5px solid #d6e4f5;
+        border-top-color:#007bff;border-radius:50%;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
   p{font-size:.85rem;color:#666;margin-top:1rem;}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="icon">⏳</div>
   <h2>Device is busy</h2>
-  <div id="timer">--:--</div>
+  <div class="spin" role="status" aria-label="Waiting"></div>
   <p>Another user is controlling the device.<br>
-     Page will refresh automatically when the session is released.</p>
+     The control panel opens automatically when it is free.</p>
 </div>
 <script>
-function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
 function poll(){
-  fetch('/api/session').then(r=>r.json()).then(d=>{
+  fetch('/api/session',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     if(!d.busy){location.replace('/');return;}
-    document.getElementById('timer').textContent=fmt(d.remainSec);
     setTimeout(poll,2000);
   }).catch(()=>setTimeout(poll,3000));
 }
@@ -341,8 +349,14 @@ void handleSite() {
     json += busy ? "true" : "false";
     json += ",\"remainSec\":";
     json += String(remain);
+    bool owner = isAuthorized(req);
     json += ",\"owner\":";                   // does this page hold the session?
-    json += isAuthorized(req) ? "true" : "false";
+    json += owner ? "true" : "false";
+    // This page's session ended by the idle timeout: show "Session ended"
+    bool expired = !owner && expiredToken.length() > 0 &&
+                   cookieToken(req) == expiredToken;
+    json += ",\"expired\":";
+    json += expired ? "true" : "false";
     json += "}";
     req->send(200, "application/json", json);
   });

@@ -675,7 +675,11 @@ void handlePresetPause(AsyncWebServerRequest *req) {
     return;
   }
 
-  schedulerPause();
+  // POST /preset/pause?source=playground: Playground pause (ends by itself
+  // when the session ends); anything else is a Dashboard pause
+  const bool fromPlayground = req->hasParam("source") &&
+                              req->getParam("source")->value() == "playground";
+  schedulerPause(fromPlayground ? PAUSE_SRC_PLAYGROUND : PAUSE_SRC_DASHBOARD);
 
   StaticJsonDocument<1024> resp;
   resp["status"]    = taskStatusToString();
