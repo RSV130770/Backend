@@ -132,12 +132,13 @@ static String buildTemplateJson() {
   tplSteady(s, 4, g, "Fan", ID_FAN);
 
   // 5 Finishing (open-ended): all lights 06:30-22:30; pump 10 s / 60 min;
-  // the harvest message on day 0 at 09:00 (its sound comes with the Sound
-  // output)
+  // the harvest message with a sound on day 0 at 09:00
   tplLights(s, 5, g, "Light", all, 5, "06:30", "22:30");
   tplCycle(s, 5, g, "Pump", ID_PUMP, 10, 3600);
   JsonObject m = tplEvent(s, 5, ++g, "Harvest", ID_MESSAGE, "once", "09:00", 100, 0, 0, 0, 0);
   m["message"] = "Ready to harvest";
+  JsonObject snd = tplEvent(s, 5, g, "Harvest", ID_SOUND, "once", "09:00", TPL_PCT, 0, 0, 0, 0);
+  snd["sound"] = "stage.wav";
 
   if (doc.overflowed()) Serial.println("buildTemplateJson: document too small");
   String out;
@@ -841,7 +842,7 @@ static void fillStageState(JsonDocument &resp) {
 }
 
 void handleApiState(AsyncWebServerRequest *req) {
-  DynamicJsonDocument resp(2560);   // 10 outputs + sensors + messages + stages
+  DynamicJsonDocument resp(3072);   // 11 outputs + sensors + messages + stages
   fillDashboardState(resp);
   // Task status for the page, and the message of a reached pause point
   resp["taskStatus"] = taskStatusToString();

@@ -2,6 +2,7 @@
 #include <Ticker.h>
 #include <algorithm>
 #include <SPIFFS.h>
+#include "sound.h"
 
 Ticker schedulerTicker;
 extern AsyncWebServer server;
@@ -34,10 +35,17 @@ static void loadNoticeOk() {
   f.close();
 }
 
+// Sound output: the switch-on that already played (same idea as noticeKey)
+static uint32_t soundKey = 0;
+// A switch-on found later than this (after a reboot, resume or stage
+// change) is not played any more
+static const uint32_t SOUND_LATE_S = 60;
+
 void schedulerForgetEvents() {
   for (int ch = 0; ch < OUTPUT_COUNT; ch++) lastApplied[ch] = nullptr;
   activeFreeze = nullptr;
   noticeKey = 0;
+  soundKey = 0;
 }
 
 // When the current switch-on of an event began
@@ -58,6 +66,20 @@ static void applyEvent(MachineEvent* ev) {
   const bool confirmed = (ev->channelId == ID_MESSAGE && key == okKey);
   if (confirmed && ev->type == EVENT_CUSTOM) return;  // hidden this cycle
   ev->applyAt();
+  if (ev->channelId == ID_SOUND) {
+    // Play once per switch-on, at the event's volume (the duty)
+    const Output &s = OUT[ID_SOUND];
+    if (s.target == 0 || key == soundKey) return;
+    soundKey = key;
+    const uint32_t began = key > ev->beginEpoch ? key : ev->beginEpoch;
+    if (NOW_EPOCH > began + SOUND_LATE_S) {
+      Serial.printf("Sound %s skipped: due %lu s ago\n", ev->sound.c_str(),
+                    (unsigned long)(NOW_EPOCH - began));
+      return;
+    }
+    soundPlay(ev->sound, (uint8_t)s.target);
+    return;
+  }
   if (ev->channelId != ID_MESSAGE) return;
 
   Output &m = OUT[ID_MESSAGE];
@@ -312,6 +334,7 @@ void schedulerTick() {
       saveTaskData();
       Serial.printf("Task waits at the end of stage %u: %s\n",
                     dueFreeze->seq + 1, dueFreeze->message.c_str());
+      soundPlay("stage.wav", SOUND_DEFAULT_VOLUME);   // call the user
     }
   } else if (lastStageEnded()) {
     schedulerFinish();

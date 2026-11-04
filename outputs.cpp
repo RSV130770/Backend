@@ -31,7 +31,8 @@ Output OUT[OUTPUT_COUNT] = {
   Output(MIST_IO, ID_MIST, MODE_NO_RAMP, "Mist", "/mist.svg", "background-color:#C7C7F1;", false),                      // 6
   Output(FAN_IO, ID_FAN, MODE_ANALOG_RAMP, "Fan", "/fan.svg", "background-color:#C7C7F1;", false),                      // 7
   Output(AUX_IO, ID_AUX, MODE_ANALOG_RAMP, "AUX", "/aux.svg", "background-color:#C7C7F1;", false),                      // 8
-  Output(NO_GPIO, ID_MESSAGE, MODE_MESSAGE, "Message", "/message.svg", "background-color:#FFE7A3;", false)          // 9 virtual
+  Output(NO_GPIO, ID_MESSAGE, MODE_MESSAGE, "Message", "/message.svg", "background-color:#FFE7A3;", false),         // 9 virtual
+  Output(NO_GPIO, ID_SOUND, MODE_SOUND, "Sound", "/sound.svg", "background-color:#C9F2D9;", false)                 // 10 virtual
 };
 
 static uint8_t nextLedcChannel = 0;
@@ -70,7 +71,7 @@ void initLEDC() {
   for (int i = 0; i < OUTPUT_COUNT; i++) {
     Output &o = OUT[i];
 
-    if (o.mode == MODE_MESSAGE) continue;   // virtual, no pin
+    if (o.isVirtual()) continue;   // no pin
 
     if (o.mode == MODE_NO_RAMP) {
       // pure digital, skip LEDC
@@ -149,7 +150,7 @@ Output::Output(uint8_t pin,
     rampEndEpoch(0),
     nextDailyEpoch(0),
   changed(true) {
-    if (mode == MODE_MESSAGE) {
+    if (mode == MODE_MESSAGE || mode == MODE_SOUND) {
       ledcChannel = 255;   // virtual, no pin
     } else if (mode == MODE_NO_RAMP) {
       pinMode(gpio, OUTPUT);
@@ -188,6 +189,10 @@ void Output::reset() {
 void Output::writePWM(int value) {
   if (mode == MODE_MESSAGE) {
     current = (value > 0 ? 255 : 0);   // no hardware: on/off only
+    return;
+  }
+  if (mode == MODE_SOUND) {
+    current = (value < 0 ? 0 : value > 255 ? 255 : value);   // the volume
     return;
   }
   if (mode == MODE_NO_RAMP) {
@@ -232,6 +237,13 @@ void Output::setTarget(int value) {
   changed = true;
 
   switch (mode) {
+
+    case MODE_SOUND:
+      // The volume of the next sound; the scheduler starts the playback
+      current = target;
+      ramping = false;
+      delta = 0;
+      return;
 
     case MODE_MESSAGE:
       current = target = (value > 0 ? 255 : 0);
@@ -283,7 +295,7 @@ void Output::setTarget(int value) {
   }
 }
 void Output::update() {
-  if (mode == MODE_NO_RAMP || mode == MODE_MESSAGE) {
+  if (mode == MODE_NO_RAMP || isVirtual()) {
     // Nothing to update, ON/OFF already handled
     return;
   }

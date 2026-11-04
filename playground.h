@@ -5,6 +5,7 @@
 #include <SPIFFS.h>
 #include <scheduler.h>
 #include "outputs.h"
+#include "sound.h"
 
 void setupPlayground();
 extern void schedulerPause();

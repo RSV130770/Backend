@@ -366,7 +366,7 @@ void slider_setting(AsyncWebServerRequest *request) {
   int ch    = request->getParam("channel", true)->value().toInt();
   int value = request->getParam("value",   true)->value().toInt();
 
-  if (ch < 0 || ch >= OUTPUT_COUNT || OUT[ch].mode == MODE_MESSAGE || value < 0 || value > 100) {
+  if (ch < 0 || ch >= OUTPUT_COUNT || OUT[ch].isVirtual() || value < 0 || value > 100) {
     request->send(400, "text/plain", "Invalid parameters");
     return;
   }
@@ -460,7 +460,15 @@ void setup() {
   pinMode(SDPIN, OUTPUT);
   pinMode(PROG_PIN, INPUT_PULLUP);   // PROG button (external pull-up R1 too)
   setup_sound();
+  soundBegin(SDPIN);   // playback task for scheduled and Playground sounds
   p();
+}
+
+// A Playground pause ends when its user is gone (Leave, page closed, phone
+// left the network, idle timeout, reboot); a warning sound tells it.
+void checkAutoResume() {
+  if (!sessionFree()) return;
+  if (schedulerAutoResume()) soundPlay("warning.wav", SOUND_DEFAULT_VOLUME);
 }
 
 void loop() {
@@ -468,5 +476,6 @@ void loop() {
   tickWifiScan();   // completes async scan and updates cache without blocking
   homeNetLoop();    // joins / watches the home network in the background
   checkProgButton();  // PROG held 10 s: network settings to factory values
+  checkAutoResume();  // Playground pause with nobody in control: continue
   delay(1);
 }

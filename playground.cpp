@@ -20,7 +20,7 @@ void handlePlaygroundParams(AsyncWebServerRequest *req, uint8_t *data, size_t le
   // 1. Validate channel ID
   //---
   int id = doc["id"] | -1;
-  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].mode == MODE_MESSAGE) {
+  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].isVirtual()) {
     req->send(400, "application/json", "{\"error\":\"Invalid ID\"}");
     return;
   }
@@ -69,7 +69,7 @@ void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t l
     return;
   }
   int id = doc["id"] | -1;
-  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].mode == MODE_MESSAGE) {
+  if (id < 0 || id >= OUTPUT_COUNT || OUT[id].isVirtual()) {
     req->send(400, "application/json", "{\"error\":\"Invalid ID\"}");
     Serial.println("Invalid ID");
     return;
@@ -152,6 +152,23 @@ void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t l
 }
 bool requireSession(AsyncWebServerRequest *req);   // site.cpp
 
+// Play a sound now: {"file": "stage.wav", "volume": 50} (volume in %)
+void handlePlaygroundSound(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
+  StaticJsonDocument<128> doc;
+  if (deserializeJson(doc, data, len)) {
+    req->send(400, "application/json", "{\"error\":\"Bad JSON\"}");
+    return;
+  }
+  String file = doc["file"] | "";
+  int pct = doc["volume"] | 50;
+  pct = constrain(pct, 1, 100);
+  if (!soundPlay(file, (uint8_t)((pct * 255) / 100))) {
+    req->send(404, "application/json", "{\"error\":\"cannot play\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"status\":\"playing\"}");
+}
+
 void setupPlayground() {
   // Playground: direct output control
   server.on(
@@ -174,4 +191,24 @@ void setupPlayground() {
       if (!requireSession(req)) return;
       handlePlaygroundParams(req, data, len);
     });
+
+  // Playground: play a sound file
+  server.on(
+    "/playground/sound", HTTP_POST,
+    [](AsyncWebServerRequest *req) {},
+    nullptr,
+    [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (index != 0) return;
+      if (!requireSession(req)) return;
+      handlePlaygroundSound(req, data, len);
+    });
+
+  // The sound files for the pickers (read-only)
+  server.on("/api/sounds", HTTP_GET, [](AsyncWebServerRequest *req) {
+    StaticJsonDocument<1024> doc;
+    soundList(doc.createNestedArray("sounds"));
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+  });
 }

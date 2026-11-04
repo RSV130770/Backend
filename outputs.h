@@ -30,7 +30,7 @@
 #define ID_FAN 7    // 5V aux1
 #define ID_AUX 8    // 5V aux2
 #define ID_MESSAGE 9  // virtual output: a text message on the dashboard
-#define ID_SOUND 10   // sound output (not in OUT yet)
+#define ID_SOUND 10   // virtual output: plays a WAV file, duty = volume
 
 #define NO_GPIO 255   // virtual outputs have no pin
 
@@ -41,7 +41,7 @@
 #define LEDC_MODE LEDC_HIGH_SPEED_MODE
 #define LEDC_TIMER_BASE LEDC_TIMER_0
 #define LEDC_TIMER_SOFTSTART LEDC_TIMER_1
-#define OUTPUT_COUNT  10
+#define OUTPUT_COUNT  11
 // ---------------------------------------------
 // Output operating modes
 // ---------------------------------------------
@@ -78,6 +78,9 @@ public:
 
   // MODE_MESSAGE: the text shown while the output is on
   String text;
+
+  // Message and Sound outputs have no pin
+  bool isVirtual() const { return mode == MODE_MESSAGE || mode == MODE_SOUND; }
 
   // Duty control
   float current;
@@ -144,6 +147,7 @@ public:
       case MODE_ANALOG_DIRECT: return "analog_direct";
       case MODE_ANALOG_RAMP: return "analog_ramp";
       case MODE_MESSAGE: return "message";
+      case MODE_SOUND: return "sound";
       default: return "unknown";
     }
   }

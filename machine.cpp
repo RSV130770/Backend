@@ -77,6 +77,7 @@ void MachineEvent::toJson(JsonObject &o) const {
   uint8_t pct = (uint8_t)((duty * 100) / 255);
   o["duty"] = pct;
   if (message.length()) o["message"] = message;
+  if (sound.length()) o["sound"] = sound;
   if (stageIdx < STAGES.size()) o["stageId"] = STAGES[stageIdx].id;
 }
 
@@ -96,6 +97,7 @@ bool MachineEvent::fromJson(const JsonObject &o) {
   // "expireAfterDays" from the web editor; "long" from older files
   durationDays = o["expireAfterDays"] | (int)(o["long"] | 0);
   message = (const char *)(o["message"] | "");
+  sound = (const char *)(o["sound"] | "");
   return true;
 }
 void MachineEvent::ToNextSwitch() const {

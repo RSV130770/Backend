@@ -57,6 +57,7 @@ public:
   uint8_t stageIdx = 0;      // index into STAGES
   bool enabled = true;
   String message;   // Message output: the text; pause point: its text
+  String sound;     // Sound output: the file to play, e.g. "stage.wav"
   bool done = false; // once event: applied (or overridden by a later one)
 
   uint32_t activationEpoch = 0;  // cached activation time
