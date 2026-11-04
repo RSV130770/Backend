@@ -713,7 +713,7 @@ function buildDashboard() {
   container.innerHTML = "";
 
   outputsConfig.forEach(o => {
-    if (o.mode === "message") return;   // shown as a banner, not a card
+    if (o.mode === "message" || o.mode === "sound") return;   // virtual: no card
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
 
     container.insertAdjacentHTML("beforeend", `
@@ -1576,12 +1576,14 @@ function customOffsetSec(ev) {
 function createLeaf(ev, groupId) {
   const isPause = ev.repeat === 'freeze';
   const isMsg = isMessageEvent(ev);
+  const isSnd = isSoundEvent(ev);
   const cfg = outputsConfig.find(c => c.id == ev.channelId);
   const label = isPause ? `⏸ ${ev.message || 'Pause'}`
               : isMsg ? (parseInt(ev.duty) > 0 ? `✉ ${ev.message || 'Message'}` : '✉ Message')
+              : isSnd ? (parseInt(ev.duty) > 0 ? `♪ ${ev.sound || 'Sound'}` : '♪ Sound')
               : (cfg ? cfg.label : `Ch${ev.channelId}`);
   const dutyText = isPause ? 'WAIT' : isMsg ? (parseInt(ev.duty) > 0 ? 'SHOW' : 'HIDE') : leafDutyText(ev);
-  const noEdit = isPause || isMsg;     // edited in the group dialog
+  const noEdit = isPause || isMsg || isSnd;     // edited in the group dialog
   const enabled = ev.enabled !== false;
 
   const $leaf = $(`
@@ -1665,6 +1667,16 @@ function isMessageCfg(cfg) { return !!cfg && cfg.mode === 'message'; }
 function messageChannelId() {
   const cfg = Array.isArray(outputsConfig) ? outputsConfig.find(isMessageCfg) : null;
   return cfg ? Number(cfg.id) : null;
+}
+// The virtual Sound output (mode "sound"): plays a file at the On time,
+// its duty is the volume
+function isSoundCfg(cfg) { return !!cfg && cfg.mode === 'sound'; }
+function soundChannelId() {
+  const cfg = Array.isArray(outputsConfig) ? outputsConfig.find(isSoundCfg) : null;
+  return cfg ? cfg.id : null;
+}
+function isSoundEvent(ev) {
+  return ev.repeat !== 'freeze' && soundChannelId() !== null && Number(ev.channelId) === soundChannelId();
 }
 function isMessageEvent(ev) {
   return ev.repeat !== 'freeze' && messageChannelId() !== null && Number(ev.channelId) === messageChannelId();
@@ -2048,6 +2060,8 @@ function openBatchModal($row, newGroupId, stageId) {
   const msgEv = allEvents.find(ev => isMessageEvent(ev) && parseInt(ev.duty) > 0);
   batchMsgText = pauseEv ? (pauseEv.message || '') : (msgEv ? (msgEv.message || '') : '');
   batchMsgWait = !!pauseEv;
+  const sndEv = allEvents.find(ev => isSoundEvent(ev) && parseInt(ev.duty) > 0);
+  batchSoundFile = sndEv ? (sndEv.sound || '') : '';
   // Channel events (without the pause point) drive the rest of the dialog
   const existingEvents = allEvents.filter(ev => ev.repeat !== 'freeze');
   if (existingEvents.length === 0 && pauseEv) existingEvents.push(Object.assign({}, pauseEv, { repeat: 'once' }));
@@ -2145,6 +2159,8 @@ let batchMembers = new Set();
 // Message tile settings, kept while the repeat type changes
 let batchMsgText = '';
 let batchMsgWait = false;
+// Sound tile: the chosen file, kept while the repeat type changes
+let batchSoundFile = '';
 
 function buildBatchChannelList(existingEvents, repeat) {
   const $list = $('#batch-channel-list');
@@ -2196,6 +2212,23 @@ function buildBatchChannelList(existingEvents, repeat) {
       return;
     }
 
+    if (isSoundCfg(cfg)) {
+      // The file and its volume; it plays once at the On time (daily: every
+      // day, custom: every cycle)
+      $settings.append(`
+        <div class="batch-channel-row batch-msg-row batch-sound-row" data-channel="${cfg.id}">
+          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-msg-fields d-flex align-items-center">
+            <select class="form-control mr-2" id="batch-sound-file"></select>
+            <input type="number" class="form-control batch-duty-input" title="Volume, %"
+                   data-channel="${cfg.id}" value="${duty || 50}" min="1" max="100" style="width:80px;">
+            <span class="ml-1">%</span>
+          </div>
+        </div>`);
+      fillSoundSelect($settings.find('#batch-sound-file'), batchSoundFile);
+      return;
+    }
+
     let dutyInput = '';
     if (isNoRamp) {
       const checked = duty >= 50 ? 'checked' : '';
@@ -2223,6 +2256,10 @@ function buildBatchChannelList(existingEvents, repeat) {
   });
 
   $list.find('#batch-msg-text').on('input', function () { batchMsgText = this.value; });
+  $list.find('#batch-sound-file').on('change', function () {
+    batchSoundFile = this.value;
+    $(this).removeClass('is-invalid');
+  });
 
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
@@ -2266,7 +2303,7 @@ function setChannelMember(id, inGroup) {
     batchMembers.add(id);
     // A channel just added starts switched on, not at 0 %
     const $num = $(`.batch-duty-input[data-channel="${id}"]`);
-    if ($num.length && !(parseInt($num.val()) > 0)) $num.val(100);
+    if ($num.length && !(parseInt($num.val()) > 0)) $num.val(id === soundChannelId() ? 50 : 100);
     const $tog = $(`#batch-toggle-${id}`);
     if ($tog.length && !$tog.is(':checked')) $tog.prop('checked', true).trigger('change');
   } else {
@@ -2374,6 +2411,18 @@ function saveBatchItem() {
     return;
   }
 
+  // Sound tile: a file and a volume of 1..100 %
+  const sndId = soundChannelId();
+  if (sndId !== null && batchMembers.has(sndId)) {
+    const $file = $('#batch-sound-file');
+    const $vol = $(`.batch-duty-input[data-channel="${sndId}"]`);
+    const vol = parseInt($vol.val());
+    $file.toggleClass('is-invalid', !$file.val());
+    $vol.toggleClass('is-invalid', !(vol >= 1 && vol <= 100));
+    if (!$file.val() || !(vol >= 1 && vol <= 100)) return;
+    batchSoundFile = $file.val();
+  }
+
   // Time fields — meaning depends on repeat type
   const timeOn = $on.val();
   const timeOff = $off.val() || '--:--';
@@ -2416,6 +2465,22 @@ function saveBatchItem() {
       fall: prev ? (prev.fall || 0) : (cfg.fallDefault || 0),
       enabled: true
     };
+
+    if (isSoundCfg(cfg)) {
+      // Plays at the group's On time; daily also gets an Off event at the
+      // Off time, so each day starts a new switch-on
+      const snd = { ...base, rise: 0, fall: 0, sound: batchSoundFile };
+      if (isDaily) {
+        events.push({ ...snd, time: timeOn, duty, on: 0, off: 0 });
+        events.push({ ...base, rise: 0, fall: 0, time: timeOff, duty: 0, on: 0, off: 0 });
+      } else if (isCustom) {
+        const orig = existingEvents.find(ev => ev.channelId == cfg.id);
+        events.push({ ...snd, time: orig ? orig.time : '--:--', duty, on: onTotal, off: offTotal });
+      } else {
+        events.push({ ...snd, time: timeOn, duty, on: 0, off: 0 });
+      }
+      return;
+    }
 
     if (isMessageCfg(cfg)) {
       // Shown from the group's On time (until OK or its Off time)
@@ -2842,6 +2907,7 @@ function buildPlayground() {
 
   outputsConfig.forEach(o => {
     if (o.mode === "message") return;   // virtual output, nothing to drive
+    if (o.mode === "sound") { container.append(buildSoundCard(o)); return; }
 
     const hasParams = o.mode !== "no_ramp"; // Debug NO_RAMP has no collapse
     const invertStyle = o.invert ? "filter: invert(100%);" : "";
@@ -2937,6 +3003,17 @@ function buildPlayground() {
 
 function bindPlaygroundEvents() {
 
+// Sound card: volume label, Play
+$(".play-sound-volume").on("input", function () {
+  $(`#play-sound-vol-${$(this).data("id")}`).text(this.value + " %");
+});
+$(".play-sound-btn").on("click", function () {
+  const id = $(this).data("id");
+  const file = $(`#play-sound-file-${id}`).val();
+  const volume = parseInt($(`.play-sound-volume[data-id=${id}]`).val()) || 50;
+  playSoundNow(id, file, volume);
+});
+
 // Collapse on label click
 $(".play-header, .play-label").on("click", function (e) {
   if ($(e.target).closest(".play-control").length) return;
@@ -2947,8 +3024,8 @@ if ($(e.target).closest(".play-btn").length) return;
   if (target) $(target).collapse("toggle");
 });
 
-// ON / OFF buttons
-$(".play-btn").on("click", function () {
+// ON / OFF buttons (the Sound card has its own Play button)
+$(".play-btn").not(".play-sound-btn").on("click", function () {
   const id = $(this).data("id");
   const action = $(this).data("action");
 
@@ -2978,7 +3055,7 @@ $(".play-btn").on("click", function () {
 
 
 // Slider → direct analog control, cancels ramping
-$(".play-slider").on("input", function () {
+$(".play-slider").not(".play-sound-volume").on("input", function () {
   const id = $(this).data("id");
   const sliderVal = parseInt($(this).val()) || 0;
 
@@ -3076,6 +3153,87 @@ function sendPlaygroundParams(id, rise, fall, ontime, offtime) {
   });
 }
 
+
+
+/* ============================================================
+   SOUND OUTPUT
+   ============================================================ */
+// Sound files on the controller (GET /api/sounds), loaded once and shared
+// with the schedule editor. done(list) gets the names, e.g. "stage.wav".
+let soundFiles = null;
+function loadSoundFiles(done) {
+  if (soundFiles) { done(soundFiles); return; }
+  if (OFFLINE_MODE) { soundFiles = ["stage.wav", "warning.wav"]; done(soundFiles); return; }
+  $.ajax({ url: "/api/sounds", dataType: "json", timeout: 5000 })
+    .done(d => { soundFiles = (d.sounds || []).slice().sort(); done(soundFiles); })
+    .fail(() => done([]));     // not cached: the next dialog asks again
+}
+
+// Fill a <select> with the sound files; a file named by an event but no
+// longer on the controller stays selectable, marked "missing"
+function fillSoundSelect($sel, selected) {
+  $sel.html('<option value="">Loading...</option>');
+  loadSoundFiles(list => {
+    const names = list.slice();
+    if (selected && !names.includes(selected)) names.unshift(selected);
+    $sel.empty();
+    if (!names.length) $sel.append('<option value="">No .wav files</option>');
+    else if (!selected) $sel.append('<option value="">Choose a sound</option>');
+    names.forEach(n => {
+      const missing = !list.includes(n) ? " (missing)" : "";
+      $sel.append($("<option>").val(n).text(n + missing));
+    });
+    $sel.val(selected || "");
+  });
+}
+
+function buildSoundCard(o) {
+  const invertStyle = o.invert ? "filter: invert(100%);" : "";
+  const $card = $(`
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+          <div class="pic" style="${o.style}">
+            <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
+          </div>
+          <strong>${o.label}</strong>
+        </div>
+        <div class="play-controls d-flex">
+          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="Play">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 3.3v9.4L12 8 4 3.3z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="card-body pt-2 pb-2">
+        <select class="form-control mb-2" id="play-sound-file-${o.id}"></select>
+        <div class="d-flex align-items-center">
+          <input type="range" min="1" max="100" value="50"
+                 class="play-slider play-sound-volume form-range flex-grow-1" data-id="${o.id}">
+          <span class="ml-2 text-nowrap" id="play-sound-vol-${o.id}">50 %</span>
+        </div>
+        <div class="text-danger small mt-1 d-none" id="play-sound-err-${o.id}"></div>
+      </div>
+    </div>`);
+  fillSoundSelect($card.find("select"), "");
+  return $card;
+}
+
+function playSoundNow(id, file, volume) {
+  const $err = $(`#play-sound-err-${id}`).addClass("d-none");
+  if (!file) { $err.text("Choose a sound first.").removeClass("d-none"); return; }
+  const $btn = $(`.play-sound-btn[data-id=${id}]`).addClass("play-active");
+  setTimeout(() => $btn.removeClass("play-active"), 600);
+  if (OFFLINE_MODE) return;
+  $.ajax({
+    url: "/playground/sound",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify({ file, volume }),
+    error: () => $err.text("The controller could not play " + file + ".").removeClass("d-none")
+  });
+}
 /* ============================================================
    SETTINGS PAGE
    Endpoints used:
