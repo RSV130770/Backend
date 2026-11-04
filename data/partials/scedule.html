@@ -8,13 +8,15 @@
 
     <div class="card-body pl-2 pr-2">
 
+      <!-- Stages run one after another; each holds its groups -->
       <div id="schedule-tree"></div>
+      <div id="schedule-error" class="alert alert-warning mt-2 mb-0 d-none" role="alert"></div>
 
     </div>
 
     <div class="card-footer d-flex justify-content-end">
       <button class="btn btn-outline-danger mr-auto" id="delete-btn" disabled>Delete</button>
-      <button class="btn btn-success" id="add-btn">Add</button>
+      <button class="btn btn-success" id="add-btn" title="Add a stage">Add stage</button>
       <button class="btn btn-primary" id="apply-btn">Apply</button>
       <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
     </div>
