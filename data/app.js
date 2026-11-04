@@ -1164,10 +1164,20 @@ let nextGroupId = 1;
 function renderSchedule(list) {
   syncGroupIdCounter(list);
 
+  // Old pause points are not used any more: a stage end pauses instead
+  list = list.filter(ev => ev.repeat !== 'freeze');
+
+  // A task without stages is one open-ended stage
+  if (!Array.isArray(taskStages) || taskStages.length === 0)
+    taskStages = [newStage(1, 'Stage 1', 0, 0)];
+  const known = new Set(taskStages.map(st => Number(st.id)));
+  const firstStage = Number(taskStages[0].id);
+
   const groups = {};
   const ordered = [];
 
   list.forEach(item => {
+    if (!known.has(Number(item.stageId))) item.stageId = firstStage;
     if (item.groupId && item.groupId > 0) {
       if (!groups[item.groupId]) {
         groups[item.groupId] = [];
@@ -1185,10 +1195,14 @@ function renderSchedule(list) {
 
   const $tree = $('#schedule-tree');
   $tree.empty();
+  $('#schedule-error').addClass('d-none');
+  taskStages.forEach(st => $tree.append(buildStageNode(st)));
 
   ordered.forEach(entry => {
-    createTreeNode(groups[entry.groupId]);
+    const evs = groups[entry.groupId];
+    createTreeNode(evs, evs[0].stageId);
   });
+  refreshStageHeaders();
 }
 
 // Collect current events of a node from its leaves (leaves are the single source of truth)
@@ -1272,10 +1286,255 @@ function buildTreeNode(events) {
   return $node;
 }
 
-function createTreeNode(events) {
+// A group node in its stage (the first stage if the stage is unknown)
+function createTreeNode(events, stageId) {
   const $node = buildTreeNode(events);
-  if ($node) $('#schedule-tree').append($node);
+  if (!$node) return $node;
+  let $stage = stageNodeById(stageId);
+  if (!$stage.length) $stage = stageNodes().first();
+  $stage.find('.stage-groups').append($node);
   return $node;
+}
+
+// ---------------------------------------------------------
+// STAGES
+// ---------------------------------------------------------
+// The tree has one node per stage, in run order; each stage node holds its
+// groups. The stage of a group is the stage node it sits in (stageId of its
+// events is set from it on Apply). A stage: { id, name, days, hours,
+// endPause, message }; length 0 d 0 h = open-ended (last stage only).
+
+function newStage(id, name, days, hours) {
+  return { id: id, name: name, days: days, hours: hours, endPause: false, message: '' };
+}
+
+function stageLengthText(st) {
+  const d = Number(st.days) || 0, h = Number(st.hours) || 0;
+  if (!d && !h) return 'open-ended';
+  return (d ? d + ' d' : '') + (d && h ? ' ' : '') + (h ? h + ' h' : '');
+}
+
+function stageIsOpen(st) {
+  return !(Number(st.days) || 0) && !(Number(st.hours) || 0);
+}
+
+function stageNodes() {
+  return $('#schedule-tree .stage-node');
+}
+
+function stageNodeById(id) {
+  return stageNodes().filter(function () { return $(this).data('stage').id === Number(id); }).first();
+}
+
+function nextStageId() {
+  let max = 0;
+  stageNodes().each(function () { max = Math.max(max, $(this).data('stage').id); });
+  return max + 1;
+}
+
+function buildStageNode(st) {
+  const $s = $(`
+  <div class="stage-node">
+    <div class="stage-header">
+      <span class="tree-toggle">▼</span>
+      <div class="stage-label">
+        <span class="stage-num"></span><span class="stage-name"></span>
+        <span class="stage-len"></span>
+        <span class="stage-pause d-none" title="Pauses at its end">⏸</span>
+      </div>
+      <div class="tree-actions">
+        <button class="stage-add-btn" title="Add a group to this stage">+</button>
+        <button class="tree-edit-btn" title="Edit stage">✏</button>
+      </div>
+    </div>
+    <div class="stage-groups collapse show">
+      <div class="stage-empty text-muted small">No groups yet. Tap + to add one.</div>
+    </div>
+  </div>`);
+  $s.data('stage', Object.assign({}, st, { id: Number(st.id) }));
+
+  const $groups = $s.find('.stage-groups');
+  $s.find('.stage-header').on('click', function (e) {
+    if ($(e.target).closest('.tree-actions').length) return;
+    const $toggle = $s.find('.stage-header .tree-toggle');
+    if ($groups.hasClass('show')) {
+      ensureCollapseHidden($groups);
+      $toggle.text('▶');
+    } else {
+      ensureCollapseShown($groups);
+      $toggle.text('▼');
+    }
+  });
+  $s.find('.stage-add-btn').on('click', e => {
+    e.stopPropagation();
+    ensureCollapseShown($groups);
+    $s.find('.stage-header .tree-toggle').text('▼');
+    openBatchModal(null, generateGroupId(), $s.data('stage').id);
+  });
+  $s.find('.stage-header .tree-edit-btn').on('click', e => {
+    e.stopPropagation();
+    openStageModal($s);
+  });
+  return $s;
+}
+
+// Numbers, names, lengths, pause marks and "no groups" hints of all stages
+function refreshStageHeaders() {
+  stageNodes().each(function (i) {
+    const $s = $(this);
+    const st = $s.data('stage');
+    $s.attr('data-stage-id', st.id);
+    $s.find('.stage-num').text(`${i + 1}. `);
+    $s.find('.stage-name').text(st.name || 'Stage');
+    $s.find('.stage-len').text(stageLengthText(st));
+    $s.find('.stage-pause').toggleClass('d-none', !(st.endPause && !stageIsOpen(st)));
+    $s.find('.stage-empty').toggle($s.find('.tree-node').length === 0);
+  });
+}
+
+// Stages in tree order, as saved in the preset
+function collectStages() {
+  return stageNodes().map(function () {
+    const st = $(this).data('stage');
+    return {
+      id: st.id,
+      name: (st.name || '').trim() || 'Stage',
+      days: Number(st.days) || 0,
+      hours: Number(st.hours) || 0,
+      endPause: !!st.endPause && !stageIsOpen(st),
+      message: st.endPause ? (st.message || '') : ''
+    };
+  }).get();
+}
+
+// "Add stage": a new stage at the end; when the last stage is open-ended
+// (it runs until Stop) the new one goes before it
+function addStage() {
+  $('#schedule-error').addClass('d-none');
+  openStageModal(null);
+}
+
+let stageModalNode = null;       // stage node being edited, null = new stage
+
+function stageModalIsLast() {
+  if (!stageModalNode) {
+    const $last = stageNodes().last();
+    return !$last.length || !stageIsOpen($last.data('stage'));
+  }
+  return stageModalNode.is(stageNodes().last());
+}
+
+function updateStageModalHints() {
+  const d = parseInt($('#stage-days').val()) || 0;
+  const h = parseInt($('#stage-hours').val()) || 0;
+  const open = !d && !h;
+  const last = stageModalIsLast();
+  let hint = '';
+  if (open) hint = last ? 'Open-ended: it runs until Stop.'
+                        : 'Only the last stage can be open-ended.';
+  else if (last) hint = 'The last stage: when it ends, the task is finished.';
+  $('#stage-len-hint').text(hint);
+  $('#stage-end-group').toggle(!open);
+  $('#stage-message').toggle($('#stage-end-pause').is(':checked'));
+
+  const $all = stageNodes();
+  const idx = stageModalNode ? $all.index(stageModalNode) : -1;
+  $('#stage-move-group').toggle(!!stageModalNode && $all.length > 1);
+  $('#stage-up').prop('disabled', idx <= 0);
+  $('#stage-down').prop('disabled', idx < 0 || idx >= $all.length - 1);
+  $('#stage-delete-btn').toggle(!!stageModalNode).prop('disabled', $all.length <= 1);
+  $('#stage-title').text(stageModalNode ? `Stage ${idx + 1} of ${$all.length}` : 'New stage');
+}
+
+function openStageModal($stage) {
+  stageModalNode = $stage || null;
+  const st = $stage ? $stage.data('stage') : newStage(0, '', 7, 0);
+  $('#stage-name').val(st.name || '').removeClass('is-invalid');
+  $('#stage-days').val(Number(st.days) || 0);
+  $('#stage-hours').val(Number(st.hours) || 0);
+  $(st.endPause ? '#stage-end-pause' : '#stage-end-next').prop('checked', true);
+  $('#stage-message').val(st.message || '').removeClass('is-invalid');
+  $('#stage-error').hide().text('');
+  $('#stage-delete-confirm').addClass('d-none');
+
+  $('#stage-days, #stage-hours').off('input.stage').on('input.stage', updateStageModalHints);
+  // A corrected field clears the error shown for it
+  $('#stage-name, #stage-message, #stage-days, #stage-hours').off('input.stagefix')
+    .on('input.stagefix', function () { $(this).removeClass('is-invalid'); $('#stage-error').hide(); });
+  $('input[name="stage-end"]').off('change.stage').on('change.stage', updateStageModalHints);
+  $('#stage-up').off('click').on('click', () => moveStage(-1));
+  $('#stage-down').off('click').on('click', () => moveStage(1));
+  $('#stage-delete-btn').off('click').on('click', askDeleteStage);
+  $('#stage-delete-cancel').off('click').on('click', () => $('#stage-delete-confirm').addClass('d-none'));
+  $('#stage-delete-ok').off('click').on('click', deleteStage);
+  $('#stage-save-btn').off('click').on('click', saveStage);
+
+  updateStageModalHints();
+  $('#stageModal').modal({ backdrop: 'static', keyboard: false });
+  $('#stageModal').modal('show');
+}
+
+// Moves the stage at once (the tree shows the new order behind the dialog)
+function moveStage(dir) {
+  if (!stageModalNode) return;
+  if (dir < 0) {
+    const $prev = stageModalNode.prev('.stage-node');
+    if ($prev.length) stageModalNode.insertBefore($prev);
+  } else {
+    const $next = stageModalNode.next('.stage-node');
+    if ($next.length) stageModalNode.insertAfter($next);
+  }
+  refreshStageHeaders();
+  updateStageModalHints();
+}
+
+function askDeleteStage() {
+  if (!stageModalNode || stageNodes().length <= 1) return;
+  const st = stageModalNode.data('stage');
+  const n = stageModalNode.find('.tree-node').length;
+  $('#stage-delete-text').text(n
+    ? `Delete ${st.name || 'this stage'} and its ${n} group${n > 1 ? 's' : ''}?`
+    : `Delete ${st.name || 'this stage'}?`);
+  $('#stage-delete-confirm').removeClass('d-none');
+}
+
+function deleteStage() {
+  if (!stageModalNode) return;
+  stageModalNode.remove();
+  stageModalNode = null;
+  $('#stageModal').modal('hide');
+  refreshStageHeaders();
+}
+
+function saveStage() {
+  const name = $('#stage-name').val().trim();
+  const days = Math.max(0, Math.min(365, parseInt($('#stage-days').val()) || 0));
+  const hours = Math.max(0, Math.min(23, parseInt($('#stage-hours').val()) || 0));
+  const endPause = $('#stage-end-pause').is(':checked') && (days || hours);
+  const message = $('#stage-message').val().trim();
+  const fail = (msg, $field) => {
+    $('#stage-error').text(msg).show();
+    if ($field) $field.addClass('is-invalid').trigger('focus');
+  };
+  $('#stage-name, #stage-message').removeClass('is-invalid');
+
+  if (!name) return fail('Enter a name for the stage.', $('#stage-name'));
+  if (!days && !hours && !stageModalIsLast())
+    return fail('Only the last stage can be open-ended: give it a length.');
+  if (endPause && !message)
+    return fail('Enter the message shown while the task waits.', $('#stage-message'));
+
+  const values = { name, days, hours, endPause: !!endPause, message: endPause ? message : '' };
+  if (stageModalNode) {
+    stageModalNode.data('stage', Object.assign({}, stageModalNode.data('stage'), values));
+  } else {
+    const $s = buildStageNode(Object.assign(newStage(nextStageId(), name, days, hours), values));
+    const $last = stageNodes().last();
+    if ($last.length && stageIsOpen($last.data('stage'))) $s.insertBefore($last);
+    else $('#schedule-tree').append($s);
+  }
+  $('#stageModal').modal('hide');
+  refreshStageHeaders();
 }
 
 function leafDutyText(ev) {
@@ -1705,7 +1964,7 @@ function bindScheduleUI() {
 
   // Buttons
   $('#save-edit').on('click', saveScheduleItem);
-  $('#add-btn').on('click', addNewScheduleItem);
+  $('#add-btn').on('click', addStage);
   $('#apply-btn').on('click', applyScheduleToServer);
   $('#cancel-btn').on('click', loadScheduleFromTask);
   $('#delete-btn').on('click', showDeleteDialog);
@@ -1724,6 +1983,7 @@ function loadScheduleFromTask() {
     } else {
       taskContent = [];
     }
+    taskStages = [];
     renderSchedule(taskContent);
     return;
   }
@@ -1735,8 +1995,7 @@ function loadScheduleFromTask() {
 // Show a preset from /preset/content in the tree.
 // Plant presets (described by growth "phases") can be started from the
 // dashboard but cannot be edited here.
-// Stages of the loaded task. Sent back unchanged on save until the editor
-// can edit stages; groups keep their stage (stageId) when edited.
+// Stages of the loaded task, in run order (rebuilt from the tree on Apply)
 let taskStages = [];
 
 function showPresetSchedule(data) {
@@ -1757,7 +2016,8 @@ function showPresetSchedule(data) {
 
 // AFTER — entire new function:
 function addNewScheduleItem() {
-  openBatchModal(null, generateGroupId());
+  const $first = stageNodes().first();
+  openBatchModal(null, generateGroupId(), $first.length ? $first.data('stage').id : 1);
 }
 
 
@@ -1768,11 +2028,14 @@ function addNewScheduleItem() {
 let currentBatchRow = null;
 let currentBatchGroupId = 0;
 let currentLeafGroupId = 0;
+let currentBatchStageId = 0;     // stage the edited / new group belongs to
 let editModalMode = null;
 
-function openBatchModal($row, newGroupId) {
+function openBatchModal($row, newGroupId, stageId) {
   currentBatchRow = $row || null;
   currentBatchGroupId = newGroupId || ($row ? $row.data('groupId') : generateGroupId());
+  const $stage = $row ? $row.closest('.stage-node') : stageNodeById(stageId);
+  currentBatchStageId = $stage.length ? $stage.data('stage').id : Number(stageId) || 1;
 
   const isNew = !$row;
   const allEvents = isNew ? [] : getNodeEvents($row);
@@ -1916,7 +2179,8 @@ function buildBatchChannelList(existingEvents, repeat) {
     const isNoRamp = cfg.mode === 'no_ramp';
 
     if (isMessageCfg(cfg)) {
-      // The text, and (once groups) wait for Continue instead of OK
+      // The text, shown on the Dashboard until OK. (To pause the task,
+      // let its stage end with a pause: stage dialog.)
       $settings.append(`
         <div class="batch-channel-row batch-msg-row" data-channel="${cfg.id}">
           <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
@@ -1924,10 +2188,6 @@ function buildBatchChannelList(existingEvents, repeat) {
             <input type="text" class="form-control" id="batch-msg-text" maxlength="60"
                    placeholder="Text, e.g. Remove the lid" autocomplete="off"
                    value="${escapeHtml(batchMsgText)}">
-            <div class="custom-control custom-switch mt-1 batch-msg-wait-row"${repeat === 'once' ? '' : ' style="display:none;"'}>
-              <input type="checkbox" class="custom-control-input" id="batch-msg-wait"${batchMsgWait ? ' checked' : ''}>
-              <label class="custom-control-label" for="batch-msg-wait">Pause the task until Continue</label>
-            </div>
           </div>
         </div>`);
       return;
@@ -1960,7 +2220,6 @@ function buildBatchChannelList(existingEvents, repeat) {
   });
 
   $list.find('#batch-msg-text').on('input', function () { batchMsgText = this.value; });
-  $list.find('#batch-msg-wait').on('change', function () { batchMsgWait = this.checked; });
 
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
@@ -2103,7 +2362,7 @@ function saveBatchItem() {
   const msgId = messageChannelId();
   const withMessage = msgId !== null && batchMembers.has(msgId);
   const msgText = withMessage ? ($('#batch-msg-text').val() || '').trim() : '';
-  const withPause = withMessage && repeat === 'once' && $('#batch-msg-wait').is(':checked');
+  const withPause = false;      // pauses are stage ends now
   const pauseMessage = msgText;
 
   // A group needs at least one channel
@@ -2125,8 +2384,8 @@ function saveBatchItem() {
 
   // Build events array
   const events = [];
-  // An edited group stays in its stage (a new group goes to the first one)
-  const groupStage = existingEvents.length ? existingEvents[0].stageId : undefined;
+  // The group's stage: the stage node it sits in (or was added to)
+  const groupStage = currentBatchStageId;
 
   outputsConfig.forEach(cfg => {
     // Read duty per channel mode
@@ -2142,7 +2401,7 @@ function saveBatchItem() {
     if (isMessageCfg(cfg) && withPause) return;   // the freeze event below
 
     const base = {
-      stageId: groupStage,          // dropped by JSON.stringify when undefined
+      stageId: groupStage,
       groupId: currentBatchGroupId,
       channelId: cfg.id,
       afterDays: parseInt($('#batch-after-days').val()) || 0,
@@ -2216,9 +2475,12 @@ function saveBatchItem() {
       $newNode.find('.tree-toggle').text('▼');
     }
   } else {
-    $('#schedule-tree').append($newNode);
+    let $stage = stageNodeById(currentBatchStageId);
+    if (!$stage.length) $stage = stageNodes().first();
+    $stage.find('.stage-groups').append($newNode);
   }
   currentBatchRow = null;
+  refreshStageHeaders();
 }
 
 function openLeafModal($leaf, groupId) {
@@ -2331,10 +2593,26 @@ function saveScheduleItem() {
 // APPLY SCHEDULE TO SERVER
 // ---------------------------------------------------------
 function applyScheduleToServer() {
-  taskContent = [];
+  const stages = collectStages();
+  const openIdx = stages.findIndex(stageIsOpen);
+  if (openIdx >= 0 && openIdx < stages.length - 1) {
+    $('#schedule-error').removeClass('d-none').text(
+      `${stages[openIdx].name} is open-ended, so it has to be the last stage. ` +
+      'Give it a length or move it to the end.');
+    return;
+  }
+  $('#schedule-error').addClass('d-none');
 
-  $('#schedule-tree .tree-node').each(function () {
-    getNodeEvents($(this)).forEach(ev => taskContent.push(ev));
+  taskStages = stages;
+  taskContent = [];
+  stageNodes().each(function () {
+    const stageId = $(this).data('stage').id;
+    $(this).find('.tree-node').each(function () {
+      getNodeEvents($(this)).forEach(ev => {
+        ev.stageId = stageId;
+        taskContent.push(ev);
+      });
+    });
   });
 
   showSaveAsDialog();
