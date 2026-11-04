@@ -64,14 +64,17 @@ function requestTaskStart() {
 }
 
 
-function requestTaskPause() {
+// source "playground": the controller resumes this pause by itself when
+// the session ends; without it the pause lasts until the user resumes.
+function requestTaskPause(source) {
   if (OFFLINE_MODE) {
     taskStatus = "paused";
     updateTaskUI(taskStatus);
     return;
   }
 
-  taskApiRequest("/preset/pause", resp => {
+  const url = source ? "/preset/pause?source=" + source : "/preset/pause";
+  taskApiRequest(url, resp => {
     taskStatus = resp.status || "paused";
     taskStartTime = resp.startTime || resp.time || null;
     renderDashboard(resp);
@@ -172,7 +175,7 @@ function showPage(name) {
   if (wasTask && name === "playground") {
     if (taskStatus === "running") {
       servicePauseByPlayground = true;
-      requestTaskPause();
+      requestTaskPause("playground");
     }
   } else if (!wasTask && isTask) {
     if (servicePauseByPlayground && taskStatus === "paused") requestTaskResume();

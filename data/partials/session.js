@@ -1,8 +1,9 @@
 /* ============================================================
    SESSION WATCH
    - Keeps the control session alive while the user is actually using the
-     page (a heartbeat is sent only after recent taps or key presses), so an
-     idle user still times out after 5 minutes.
+     page (a heartbeat is sent only if there was a tap or key press since
+     the last check), so an idle user times out after about 1 minute.
+     A Playground pause then ends on the controller.
    - Detects that the session was lost (timed out, taken by another user)
      and stops the page instead of letting it send commands.
    - Checks immediately when the page becomes visible again, because a
@@ -12,13 +13,12 @@
    ============================================================ */
 
 const SESSION_CHECK_MS  = 15000;  // how often the page checks its session
-const USER_ACTIVE_MS    = 60000;  // taps within this window count as activity
 
 let sessionLost = false;
-let lastUserActionMs = Date.now();
+let userActedSinceCheck = false;  // a tap or key press since the last check
 
 ['pointerdown', 'keydown'].forEach(type =>
-  document.addEventListener(type, () => { lastUserActionMs = Date.now(); }, true));
+  document.addEventListener(type, () => { userActedSinceCheck = true; }, true));
 
 function showSessionLost() {
   if (sessionLost || OFFLINE_MODE) return;
@@ -36,17 +36,17 @@ function showSessionLost() {
     '</div>');
 }
 
-// The controller says this page no longer owns the session. If nobody else
-// took it (the controller freed it because this page went quiet, e.g. the
-// phone slept), quietly reload: loading the panel claims it again.
-// Only when another phone holds it, show "Session ended".
+// The controller says this page no longer owns the session. If it ended by
+// the idle timeout, or another phone holds it now, show "Session ended".
+// If nobody took it (the controller freed it because this page went quiet,
+// e.g. the phone slept), quietly reload: loading the panel claims it again.
 let sessionRecheck = false;
 function sessionGone() {
   if (sessionLost || sessionRecheck || OFFLINE_MODE) return;
   sessionRecheck = true;
   $.ajax({ url: '/api/session', dataType: 'json', timeout: 5000 })
     .done(d => {
-      if (d && !d.busy) {
+      if (d && !d.busy && !d.expired) {
         exitGuardLeaving = true;       // no "leave site?" prompt for this reload
         location.reload();
       } else {
@@ -65,12 +65,13 @@ $(document).ajaxError((event, xhr, settings) => {
 // Session check. An active user sends a heartbeat (POST keeps the session
 // alive), an idle user only asks (GET does not extend the session).
 // It also runs while the page is hidden: the controller frees the session
-// when the owner page is silent for 90 s (window closed without Leave), and
+// when the owner page is silent for 35 s (window closed without Leave), and
 // this check is what tells it a background page is still there.
 function checkSession() {
   if (sessionLost || OFFLINE_MODE || !appReady) return;
 
-  const active = Date.now() - lastUserActionMs < USER_ACTIVE_MS;
+  const active = userActedSinceCheck;
+  userActedSinceCheck = false;
   const request = active
     ? $.ajax({ url: '/api/ping', type: 'POST', dataType: 'json', timeout: 5000 })
     : $.ajax({ url: '/api/session', dataType: 'json', timeout: 5000 });
