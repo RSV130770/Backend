@@ -716,3 +716,58 @@ html, body {
 #pickModal {
   z-index: 3000 !important;    /* above the raised .modal-backdrop (2950) */
 }
+
+/* ------------------------- schedule stages -------------------------*/
+/* A stage holds its groups; stages run one after another */
+.stage-node {
+  margin-bottom: 12px;
+  border: 1px solid #cfe2d6;
+  border-left: 4px solid #2e8b57;
+  border-radius: 6px;
+  background: #f6fbf8;
+}
+.stage-header {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.stage-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-num { color: #2e8b57; font-weight: 700; }
+.stage-name { font-weight: 700; }
+.stage-len {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e2f0e7;
+  color: #2e6b47;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.stage-pause { margin-left: 6px; color: #d39e00; }
+.stage-groups { padding: 0 8px 4px 8px; }
+.stage-empty { padding: 4px 0 8px 26px; }
+.stage-add-btn {
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: #28a745;
+  cursor: pointer;
+}
+.stage-add-btn:hover { color: #1e7e34; }
+#stageModal {
+  z-index: 3000 !important;    /* above the raised .modal-backdrop (2950) */
+}
