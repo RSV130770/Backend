@@ -3001,7 +3001,18 @@ function buildPlayground() {
 }
 
 
+// Large Playground sliders (app.css): the filled part of the track follows
+// the value through the --val CSS variable
+function paintSlider(el) {
+  const min = Number(el.min) || 0, max = Number(el.max) || 100;
+  const pct = ((Number(el.value) - min) * 100) / (max - min || 1);
+  el.style.setProperty("--val", pct + "%");
+}
+
 function bindPlaygroundEvents() {
+
+$(".play-slider").on("input", function () { paintSlider(this); })
+  .each(function () { paintSlider(this); });
 
 // Sound card: volume label, Play
 $(".play-sound-volume").on("input", function () {
@@ -3037,9 +3048,13 @@ $(".play-btn").not(".play-sound-btn").on("click", function () {
   if (action === "on") {
     const slider = $(`.play-slider[data-id=${id}]`);
 
-    // ✔ If slider exists → use its value
-    // ✔ If slider is hidden → send 100
-    duty = slider.length ? parseInt(slider.val()) : 100;
+    // ✔ If slider exists → ramp to its value (setpoint)
+    // ✔ No slider, or the setpoint is 0 → ramp to 100
+    duty = slider.length ? (parseInt(slider.val()) || 0) : 100;
+    if (duty === 0) {
+      duty = 100;
+      if (slider.length) { slider.val(100); paintSlider(slider[0]); }
+    }
 
     sendPlaygroundCommand(id, duty, "on_button");
     simulateRampingIndicator(id, "up");
@@ -3132,11 +3147,20 @@ function simulateRampingIndicator(id, direction) {
 
 function sendPlaygroundCommand(id, duty, source="slider") {
 	 if (OFFLINE_MODE) return;
+  const body = { id, duty, source };
+  // Start/Stop ramp with the rise/fall times shown on the card; the
+  // controller would otherwise use what it last got from these fields
+  if (source !== "slider") {
+    const $rise = $(`.rise-input[data-id=${id}]`);
+    const $fall = $(`.fall-input[data-id=${id}]`);
+    if ($rise.length) body.rise = parseInt($rise.val()) || 0;
+    if ($fall.length) body.fall = parseInt($fall.val()) || 0;
+  }
   $.ajax({
     url: "/playground/control",
     type: "POST",
     contentType: "application/json",
-    data: JSON.stringify({ id, duty, source }),
+    data: JSON.stringify(body),
     success: () => console.log("Playground control OK", id, duty)
   });
 }
