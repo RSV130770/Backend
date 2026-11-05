@@ -13,11 +13,20 @@
 #define  START_MIN rtcData[6]
 #define  FROZEN_DAYS rtcData[7]   // retired: read once after an update, then kept 0
 #define  FREEZE_DONE rtcData[8] 
-// rtcData[9] is free
+#define  LANGUAGE rtcData[9]     // page language: LANG_* below, kept per farm
 // rtcData[10..13]: start of the current pause (epoch, little endian),
 // see getPauseStart() / setPauseStart()
 #define  PAUSE_SOURCE rtcData[14]  // who paused: PAUSE_SRC_* (used from step 3)
 // rtcData[15] is free
+
+// LANGUAGE values. 0 = never chosen: the page then follows the phone's
+// language. The codes match "languages" in /local.json.
+#define LANG_NONE 0
+#define LANG_EN   1
+#define LANG_RU   2
+#define LANG_ET   3
+const char *languageCode(uint8_t lang);          // "en", "ru", "et" or ""
+uint8_t languageFromCode(const char *code);      // LANG_NONE if unknown
 
 #define PAUSE_SRC_NONE       0
 #define PAUSE_SRC_PLAYGROUND 1

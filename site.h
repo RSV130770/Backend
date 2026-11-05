@@ -58,6 +58,7 @@ void tickSession();                             // call every second from loop/t
 void tickWifiScan();                            // call from loop() — processes async scan result
 
 bool isCaptiveProbe(const String &url);
+bool isPublicFile(const String &url);    // may serveStatic hand out this file?
 void handleSite();
 
 // ── CaptiveRequestHandler ─────────────────────────────────────────────────────

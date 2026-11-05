@@ -5,6 +5,20 @@
  uint8_t rtcData[RTCDATACOUNT];
  tm NOW;
 
+// Page language kept in RTC memory (LANGUAGE)
+static const char *const LANG_CODES[] = { "", "en", "ru", "et" };
+
+const char *languageCode(uint8_t lang) {
+  return lang <= LANG_ET ? LANG_CODES[lang] : "";
+}
+
+uint8_t languageFromCode(const char *code) {
+  if (!code) return LANG_NONE;
+  for (uint8_t i = LANG_EN; i <= LANG_ET; i++)
+    if (strcmp(code, LANG_CODES[i]) == 0) return i;
+  return LANG_NONE;
+}
+
 void saveTaskData() {
   RTC.writeRAM(0x0A, rtcData, RTCDATACOUNT);
 }

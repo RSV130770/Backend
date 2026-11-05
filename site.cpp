@@ -1,5 +1,6 @@
 #include "site.h"
 #include "homenet.h"
+#include "helpers.h"
 #include <SPIFFS.h>
 #include <WiFi.h>
 
@@ -166,6 +167,19 @@ void tickSession() {
   }
 }
 
+// ─── Files the browser may download ───────────────────────────────────────────
+// Page files by type, plus the texts file. Everything else on SPIFFS
+// (settings, Wi-Fi passwords, presets, sounds) is refused with 404.
+bool isPublicFile(const String &url) {
+  String u = url;
+  u.toLowerCase();
+  if (u.indexOf("..") >= 0) return false;
+  static const char *const types[] = { ".html", ".js", ".css", ".svg", ".png", ".ico", ".jpg" };
+  for (const char *t : types)
+    if (u.endsWith(t)) return true;
+  return u == "/local.json";
+}
+
 // ─── Captive probe list ────────────────────────────────────────────────────────
 
 bool isCaptiveProbe(const String &url) {
@@ -320,7 +334,14 @@ void handleSite() {
   // Captive-portal landing page (CaptiveRequestHandler redirects here)
   server.on("/portal", HTTP_GET, sendPortal);
 
+  // The busy page lives in SPIFFS (/busy.html: its texts are translated
+  // from /local.json in the page itself); the built-in English copy is
+  // used when the file is missing
   server.on("/busy", HTTP_GET, [](AsyncWebServerRequest *req) {
+    if (SPIFFS.exists("/busy.html")) {
+      sendFresh(req, "/busy.html", "text/html");
+      return;
+    }
     req->send_P(200, "text/html", BUSY_HTML);
   });
 
@@ -464,6 +485,39 @@ void handleSite() {
       req->send(200, "application/json", "{\"status\":\"disconnected\"}");
     });
 
+  // Page language, kept per farm in RTC memory (LANGUAGE, helpers.h).
+  // GET is open (the busy page may use it too); "" = never chosen.
+  server.on("/api/lang", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send(200, "application/json",
+              String("{\"lang\":\"") + languageCode(LANGUAGE) + "\"}");
+  });
+
+  // {"lang":"ru"}: only the session owner may change it
+  server.on("/api/lang", HTTP_POST,
+    [](AsyncWebServerRequest *req) {},
+    nullptr,
+    [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (index != 0) return;                 // small body: one chunk
+      if (!requireSession(req)) return;
+      StaticJsonDocument<64> doc;
+      if (deserializeJson(doc, data, len)) {
+        req->send(400, "application/json", "{\"error\":\"invalid json\"}");
+        return;
+      }
+      const uint8_t lang = languageFromCode(doc["lang"] | "");
+      if (lang == LANG_NONE) {
+        req->send(400, "application/json", "{\"error\":\"unknown language\"}");
+        return;
+      }
+      if (LANGUAGE != lang) {
+        LANGUAGE = lang;
+        saveTaskData();                       // writes the RTC memory block
+        Serial.printf("Language set to %s\n", languageCode(lang));
+      }
+      req->send(200, "application/json",
+                String("{\"lang\":\"") + languageCode(lang) + "\"}");
+    });
+
   server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (!isAuthorized(req)) { req->send(403); return; }
     lastActivityMs = millis();
@@ -567,5 +621,13 @@ void handleSite() {
   // "no-cache": the browser keeps the files but re-checks them on every load,
   // so a new upload of the data folder is picked up immediately.
   // For release builds "max-age=86400" loads faster.
-  server.serveStatic("/", SPIFFS, "/").setCacheControl("no-cache");
+  // Only the page's own files are served (see isPublicFile): SPIFFS also
+  // holds /wifi.json with the home Wi-Fi password, /pass.txt and the other
+  // settings, and anyone on the farm's Wi-Fi could download them.
+  server.serveStatic("/", SPIFFS, "/").setCacheControl("no-cache")
+        .setFilter([](AsyncWebServerRequest *r) {
+          const bool ok = isPublicFile(r->url());
+          if (!ok) SITE_LOG("Blocked file request: %s\n", r->url().c_str());
+          return ok;
+        });
 }
