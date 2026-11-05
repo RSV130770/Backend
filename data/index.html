@@ -21,16 +21,16 @@
   <div class="collapse navbar-collapse" id="mainNav">
     <ul class="navbar-nav mx-auto" id="mainNavList">
       <li class="nav-item">
-        <a class="nav-link nav-page-link active" href="#" data-page="dashboard">Dashboard</a>
+        <a class="nav-link nav-page-link active" href="#" data-page="dashboard" data-i18n="nav.dashboard">Dashboard</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link nav-page-link" href="#" data-page="schedule">Schedule</a>
+        <a class="nav-link nav-page-link" href="#" data-page="schedule" data-i18n="nav.schedule">Schedule</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link nav-page-link" href="#" data-page="playground">Playground</a>
+        <a class="nav-link nav-page-link" href="#" data-page="playground" data-i18n="nav.playground">Playground</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link nav-page-link" href="#" data-page="settings">Settings</a>
+        <a class="nav-link nav-page-link" href="#" data-page="settings" data-i18n="nav.settings">Settings</a>
       </li>
     </ul>
   </div>
@@ -47,7 +47,7 @@
 
   <div class="card mb-3">
     <div class="card-header bg-info text-white">
-      <h5 class="mb-0">Dashboard</h5>
+      <h5 class="mb-0" data-i18n="nav.dashboard">Dashboard</h5>
     </div>
 
     <div class="card-body">
@@ -55,14 +55,14 @@
       <!-- ROW 1: Task and stage tiles (tap a tile to choose) -->
       <div class="row mb-3">
         <div class="col-6 pl-0 pr-1">
-          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task">
-            <div class="dash-tile-label">Task</div>
-            <div class="dash-tile-value" id="taskSelectLabel">Loading...</div>
+          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task" data-i18n-aria="dash.task_choose">
+            <div class="dash-tile-label" data-i18n="dash.task">Task</div>
+            <div class="dash-tile-value" id="taskSelectLabel" data-i18n="common.loading">Loading...</div>
             <div class="dash-tile-sub" id="taskStatusLabel"></div>
           </div>
         </div>
         <div class="col-6 pr-0 pl-1">
-          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage">
+          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage" data-i18n-aria="dash.stage_choose">
             <div class="dash-tile-label" id="stageTileLabel">Stage</div>
             <div class="dash-tile-value" id="stageTileName">--</div>
             <div class="dash-tile-sub" id="stageTileDays"></div>
@@ -78,7 +78,7 @@
       <!-- ROW 2: Start time + buttons -->
       <div class="row mb-3 align-items-end">
         <div class="col-6 text-right p-0">
-          <button class="btn btn-success btn-small mr-2" id="taskStart">
+          <button class="btn btn-success btn-small mr-2" id="taskStart" title="Start" data-i18n-title="dash.btn_start">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <path d="M4 3.3v9.4L12 8 4 3.3z" />
             </svg>
@@ -90,7 +90,7 @@
             </svg>
           </button>
 
-          <button class="btn btn-danger btn-small" id="taskStop">
+          <button class="btn btn-danger btn-small" id="taskStop" title="Stop" data-i18n-title="dash.btn_stop">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <rect x="4" y="4" width="8" height="8" />
             </svg>
@@ -102,22 +102,22 @@
       <div class="card mt-3" id="messages-card">
         <div class="card-header dash-fold" data-toggle="collapse" data-target="#messages-body"
              role="button" aria-expanded="true" aria-controls="messages-body">
-          <span>Messages <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
+          <span><span data-i18n="dash.messages">Messages</span> <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
           <span class="dash-chevron" aria-hidden="true"></span>
         </div>
         <div id="messages-body" class="collapse show">
           <div class="card-body pb-1">
-            <div id="no-messages" class="text-muted small mb-2">No messages</div>
+            <div id="no-messages" class="text-muted small mb-2" data-i18n="dash.no_messages">No messages</div>
             <!-- The task reached a pause point and waits for the user -->
             <div id="pause-banner" class="alert alert-warning d-none" role="status">
-              <div class="font-weight-bold">The task is waiting</div>
+              <div class="font-weight-bold" data-i18n="dash.task_waiting">The task is waiting</div>
               <div id="pause-message" class="mb-2"></div>
-              <button class="btn btn-warning btn-small" id="pause-continue">Continue</button>
+              <button class="btn btn-warning btn-small" id="pause-continue" data-i18n="dash.continue">Continue</button>
             </div>
             <!-- Text of the Message output; OK hides it -->
             <div id="notice-banner" class="alert alert-info d-none" role="status">
               <div id="notice-text" class="mb-2"></div>
-              <button class="btn btn-info btn-small" id="notice-ok">OK</button>
+              <button class="btn btn-info btn-small" id="notice-ok" data-i18n="common.ok">OK</button>
             </div>
           </div>
         </div>
@@ -125,7 +125,7 @@
 
       <!-- Inputs -->
       <div class="card mt-3">
-        <div class="card-header">Inputs</div>
+        <div class="card-header" data-i18n="dash.inputs">Inputs</div>
         <div class="card-body">
           <div class="row">
 
@@ -137,7 +137,7 @@
                 </div>
                 <div class="value-big text-center" id="w_temp">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Water Temp</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.water_temp">Water Temp</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="w_temp_bar" class="progress-bar bg-info" style="width:0%"></div>
               </div>
@@ -151,7 +151,7 @@
                 </div>
                 <div class="value-big text-center" id="a_temp">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Air Temp</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.air_temp">Air Temp</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="a_temp_bar" class="progress-bar bg-danger" style="width:0%"></div>
               </div>
@@ -165,7 +165,7 @@
                 </div>
                 <div class="value-big text-center" id="a_hum">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Air Humidity</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.air_humidity">Air Humidity</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="a_hum_bar" class="progress-bar bg-success" style="width:0%"></div>
               </div>
@@ -179,7 +179,7 @@
                 </div>
                 <div class="value-big text-center" id="level">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Level</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.level">Level</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="level_bar" class="progress-bar bg-secondary" style="width:0%"></div>
               </div>
@@ -193,7 +193,7 @@
       <div class="card mt-3">
         <div class="card-header dash-fold" data-toggle="collapse" data-target="#outputs-body"
              role="button" aria-expanded="true" aria-controls="outputs-body">
-          <span>Outputs</span>
+          <span data-i18n="dash.outputs">Outputs</span>
           <span class="dash-chevron" aria-hidden="true"></span>
         </div>
         <div id="outputs-body" class="collapse show">
@@ -209,7 +209,7 @@
   <div class="card mb-3">
 
     <div class="card-header bg-primary text-white">
-      <h5 class="mb-0">Schedule: <span id="schedule-task-name">--</span></h5>
+      <h5 class="mb-0"><span data-i18n="sch.title">Schedule:</span> <span id="schedule-task-name">--</span></h5>
     </div>
 
     <div class="card-body pl-2 pr-2">
@@ -221,10 +221,10 @@
     </div>
 
     <div class="card-footer d-flex justify-content-end">
-      <button class="btn btn-outline-danger mr-auto" id="delete-btn" disabled>Delete</button>
-      <button class="btn btn-success" id="add-btn" title="Add a stage">Add stage</button>
-      <button class="btn btn-primary" id="apply-btn">Apply</button>
-      <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
+      <button class="btn btn-outline-danger mr-auto" id="delete-btn" disabled data-i18n="common.delete">Delete</button>
+      <button class="btn btn-success" id="add-btn" title="Add a stage" data-i18n-title="sch.add_stage_tip" data-i18n="sch.add_stage">Add stage</button>
+      <button class="btn btn-primary" id="apply-btn" data-i18n="sch.apply">Apply</button>
+      <button class="btn btn-secondary" id="cancel-btn" data-i18n="common.cancel">Cancel</button>
     </div>
 
   </div>
@@ -234,7 +234,7 @@
   <div class="card mb-3">
 
     <div class="card-header bg-warning text-dark">
-      <h5 class="mb-0">Playground</h5>
+      <h5 class="mb-0" data-i18n="nav.playground">Playground</h5>
     </div>
 
     <div class="card-body" id="playground-container">
@@ -251,42 +251,52 @@
   <div class="card mb-3">
 
     <div class="card-header bg-secondary text-white">
-      <h5 class="mb-0">Settings</h5>
+      <h5 class="mb-0" data-i18n="nav.settings">Settings</h5>
     </div>
 
     <div class="card-body">
 
+      <!-- LANGUAGE: flag buttons drawn by i18n.js; hidden until local.json is loaded -->
+      <div class="card mb-3" style="display:none">
+        <div class="card-header">
+          <strong data-i18n="lang.title">Language</strong>
+        </div>
+        <div class="card-body">
+          <div class="lang-flags" id="lang-flags"></div>
+        </div>
+      </div>
+
       <!-- AP SECTION -->
       <div class="card mb-3">
         <div class="card-header">
-          <strong>Access Point (AP)</strong>
-          <small class="text-muted d-block">Device hotspot — MiniFarm-XXXXXX</small>
+          <strong data-i18n="set.ap_title">Access Point (AP)</strong>
+          <small class="text-muted d-block" data-i18n="set.ap_sub">The farm's own Wi-Fi network</small>
         </div>
         <div class="card-body">
 
           <div class="form-group">
-            <label for="ap-ssid">Network Name (SSID)</label>
+            <label for="ap-ssid" data-i18n="set.ssid">Network Name (SSID)</label>
             <input type="text" class="form-control" id="ap-ssid"
                    maxlength="32" placeholder="MiniFarm-XXXXXX">
           </div>
 
           <div class="form-group">
-            <label for="ap-pass">Password (WPA2)</label>
+            <label for="ap-pass" data-i18n="set.ap_pass">Password (WPA2)</label>
             <div class="input-group">
               <input type="password" class="form-control" id="ap-pass"
                      autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
-                     maxlength="64" placeholder="Leave blank to keep current">
+                     maxlength="64" placeholder="Leave blank to keep current" data-i18n-ph="set.pass_keep_ph">
               <div class="input-group-append">
                 <button class="btn btn-outline-secondary" type="button"
                         id="ap-pass-toggle" tabindex="-1">👁</button>
               </div>
             </div>
-            <small class="text-muted">Minimum 8 characters</small>
+            <small class="text-muted" data-i18n="set.pass_min">Minimum 8 characters</small>
           </div>
 
           <div class="small text-muted" id="ap-address-line" style="display:none">
-            Farm network address: <strong id="ap-address"></strong>
-            <span id="ap-moved-note" style="display:none">(moved, because your home network uses 192.168.4.x)</span>
+            <span data-i18n="set.farm_address">Farm network address:</span> <strong id="ap-address"></strong>
+            <span id="ap-moved-note" style="display:none" data-i18n="set.address_moved">(moved, because your home network uses 192.168.4.x)</span>
           </div>
 
         </div>
@@ -295,36 +305,36 @@
       <!-- STA SECTION -->
       <div class="card mb-3">
         <div class="card-header">
-          <strong>Home Network (STA)</strong>
-          <small class="text-muted d-block">Connect to existing Wi-Fi router</small>
+          <strong data-i18n="set.sta_title">Home Network (STA)</strong>
+          <small class="text-muted d-block" data-i18n="set.sta_sub">Connect to existing Wi-Fi router</small>
         </div>
         <div class="card-body">
 
           <div class="form-group">
             <div class="d-flex justify-content-between align-items-center mb-1">
-              <label for="sta-ssid" class="mb-0">Network Name (SSID)</label>
+              <label for="sta-ssid" class="mb-0" data-i18n="set.ssid">Network Name (SSID)</label>
               <span id="sta-saved-badge" class="badge badge-success" style="display:none!important">Saved</span>
             </div>
             <div class="input-group">
               <input type="text" class="form-control" id="sta-ssid"
-                     maxlength="32" placeholder="Home network SSID">
+                     maxlength="32" placeholder="Home network SSID" data-i18n-ph="set.sta_ssid_ph">
               <div class="input-group-append">
-                <button class="btn btn-outline-info btn-sm" type="button" id="wifi-scan-btn">Scan</button>
+                <button class="btn btn-outline-info btn-sm" type="button" id="wifi-scan-btn" data-i18n="set.scan">Scan</button>
               </div>
             </div>
           </div>
 
           <div id="wifi-scan-results" style="display:none" class="mb-3">
-            <label>Found networks:</label>
+            <label data-i18n="set.found">Found networks:</label>
             <div id="wifi-scan-list" class="list-group list-group-flush" style="max-height:180px;overflow-y:auto"></div>
           </div>
 
           <div class="form-group">
-            <label for="sta-pass">Password</label>
+            <label for="sta-pass" data-i18n="set.password">Password</label>
             <div class="input-group">
               <input type="password" class="form-control" id="sta-pass"
                      autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
-                     maxlength="64" placeholder="Leave blank to keep current">
+                     maxlength="64" placeholder="Leave blank to keep current" data-i18n-ph="set.pass_keep_ph">
               <div class="input-group-append">
                 <button class="btn btn-outline-secondary" type="button"
                         id="sta-pass-toggle" tabindex="-1">👁</button>
@@ -339,32 +349,32 @@
           <div class="mb-3">
             <a href="#" class="small dash-fold collapsed d-inline-flex" data-toggle="collapse" data-target="#ip-settings"
                role="button" aria-expanded="false" aria-controls="ip-settings" id="ip-settings-toggle">
-              <span class="mr-2">IP settings</span><span class="dash-chevron" aria-hidden="true"></span>
+              <span class="mr-2" data-i18n="set.ip">IP settings</span><span class="dash-chevron" aria-hidden="true"></span>
             </a>
             <div id="ip-settings" class="collapse">
               <div class="pt-2">
                 <div class="custom-control custom-radio custom-control-inline">
                   <input type="radio" id="ip-mode-auto" name="ip-mode" value="auto" class="custom-control-input" checked>
-                  <label class="custom-control-label" for="ip-mode-auto">Automatic</label>
+                  <label class="custom-control-label" for="ip-mode-auto" data-i18n="set.ip_auto">Automatic</label>
                 </div>
                 <div class="custom-control custom-radio custom-control-inline">
                   <input type="radio" id="ip-mode-manual" name="ip-mode" value="manual" class="custom-control-input">
-                  <label class="custom-control-label" for="ip-mode-manual">Manual</label>
+                  <label class="custom-control-label" for="ip-mode-manual" data-i18n="set.ip_manual">Manual</label>
                 </div>
-                <small class="text-muted d-block mt-1 mb-2" id="ip-mode-hint">
+                <small class="text-muted d-block mt-1 mb-2" id="ip-mode-hint" data-i18n="set.ip_auto_hint">
                   The farm takes a free address .200–.249 in your network and keeps it.
                 </small>
                 <div class="ip-grid">
-                  <label for="ip-addr">Address</label>
+                  <label for="ip-addr" data-i18n="set.address">Address</label>
                   <input type="text" class="form-control form-control-sm ip-field" id="ip-addr" inputmode="decimal" placeholder="192.168.1.210" autocomplete="off">
-                  <label for="ip-mask">Mask</label>
+                  <label for="ip-mask" data-i18n="set.mask">Mask</label>
                   <input type="text" class="form-control form-control-sm ip-field" id="ip-mask" inputmode="decimal" placeholder="255.255.255.0" autocomplete="off">
-                  <label for="ip-gw">Gateway</label>
+                  <label for="ip-gw" data-i18n="set.gateway">Gateway</label>
                   <input type="text" class="form-control form-control-sm ip-field" id="ip-gw" inputmode="decimal" placeholder="192.168.1.1" autocomplete="off">
                   <label for="ip-dns1">DNS 1</label>
-                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns1" inputmode="decimal" placeholder="router" autocomplete="off">
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns1" inputmode="decimal" placeholder="router" data-i18n-ph="set.router_ph" autocomplete="off">
                   <label for="ip-dns2">DNS 2</label>
-                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns2" inputmode="decimal" placeholder="optional" autocomplete="off">
+                  <input type="text" class="form-control form-control-sm ip-field" id="ip-dns2" inputmode="decimal" placeholder="optional" data-i18n-ph="set.optional_ph" autocomplete="off">
                 </div>
                 <small class="text-muted d-block mt-2" id="ip-reserve-hint" style="display:none"></small>
               </div>
@@ -372,9 +382,7 @@
           </div>
 
           <div id="sta-disconnect-row" style="display:none">
-            <button class="btn btn-outline-danger btn-sm" id="sta-disconnect-btn">
-              Disconnect from home network
-            </button>
+            <button class="btn btn-outline-danger btn-sm" id="sta-disconnect-btn" data-i18n="set.disconnect">Disconnect from home network</button>
           </div>
 
         </div>
@@ -384,7 +392,7 @@
       <div id="settings-status" class="alert" style="display:none"></div>
 
       <!-- SAVE -->
-      <button class="btn btn-primary btn-block" id="settings-save-btn">Save &amp; Restart</button>
+      <button class="btn btn-primary btn-block" id="settings-save-btn" data-i18n="set.save_restart">Save &amp; Restart</button>
 
     </div>
   </div>
@@ -421,7 +429,7 @@
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Edit Batch</h5>
+        <h5 class="modal-title" data-i18n="batch.title">Edit Batch</h5>
         <button type="button" class="close" data-dismiss="modal">&times;</button>
       </div>
 
@@ -429,19 +437,19 @@
 
         <!-- GROUP NAME (shown in the schedule list instead of channel names) -->
         <div class="form-group">
-          <label for="batch-name">Name</label>
+          <label for="batch-name" data-i18n="common.name">Name</label>
           <input type="text" class="form-control" id="batch-name" maxlength="24"
-                 placeholder="e.g. Lights (empty: channel names)"
+                 placeholder="e.g. Lights (empty: channel names)" data-i18n-ph="batch.name_ph"
                  autocomplete="off" autocapitalize="sentences" spellcheck="false">
         </div>
 
         <!-- REPEAT TYPE -->
         <div class="form-group">
-          <label for="batch-repeat">Repeat</label>
+          <label for="batch-repeat" data-i18n="common.repeat">Repeat</label>
           <select class="form-control" id="batch-repeat">
-            <option value="daily">Every Day</option>
-            <option value="custom">Custom</option>
-            <option value="once">Once</option>
+            <option value="daily" data-i18n="sch.repeat_daily">Every Day</option>
+            <option value="custom" data-i18n="sch.repeat_custom">Custom</option>
+            <option value="once" data-i18n="sch.repeat_once">Once</option>
           </select>
         </div>
         <!-- DELAY + DURATION ROW -->
@@ -449,19 +457,19 @@
           <div class="d-flex">
 
             <div class="mr-3">
-              <label>Start on day</label>
+              <label data-i18n="batch.start_day">Start on day</label>
               <input type="number" class="form-control" id="batch-after-days" min="0" max="255" value="0"
                 style="width:90px;">
             </div>
 
             <div>
-              <label>Days active</label>
+              <label data-i18n="batch.days_active">Days active</label>
               <input type="number" class="form-control" id="batch-expire" min="0" max="255" value="0"
                 style="width:90px;">
             </div>
 
           </div>
-          <small class="text-muted">Day 0 = the stage's first day. 0 days active = until the stage ends.</small>
+          <small class="text-muted" data-i18n="batch.days_hint">Day 0 = the stage's first day. 0 days active = until the stage ends.</small>
         </div>
         <!-- SHARED TIME — daily shows two times, others show one -->
         <div class="form-group" id="batch-time-on-group">
@@ -478,22 +486,22 @@
 
         <div id="batch-custom-group" style="display:none;">
           <div class="form-group d-flex align-items-center mb-2">
-            <label class="mr-3 mb-0" style="width:40px;">On</label>
+            <label class="mr-3 mb-0" style="width:40px;" data-i18n="common.on">On</label>
             <input type="number" class="form-control mr-1" id="batch-on-min" min="0" max="59" value="0"
               style="width:70px;">
-            <span class="mr-3">min</span>
+            <span class="mr-3" data-i18n="unit.min">min</span>
             <input type="number" class="form-control mr-1" id="batch-on-sec" min="0" max="59" value="0"
               style="width:70px;">
-            <span>sec</span>
+            <span data-i18n="unit.sec">sec</span>
           </div>
           <div class="form-group d-flex align-items-center">
-            <label class="mr-3 mb-0" style="width:40px;">Off</label>
+            <label class="mr-3 mb-0" style="width:40px;" data-i18n="common.off">Off</label>
             <input type="number" class="form-control mr-1" id="batch-off-min" min="0" max="59" value="0"
               style="width:70px;">
-            <span class="mr-3">min</span>
+            <span class="mr-3" data-i18n="unit.min">min</span>
             <input type="number" class="form-control mr-1" id="batch-off-sec" min="0" max="59" value="0"
               style="width:70px;">
-            <span>sec</span>
+            <span data-i18n="unit.sec">sec</span>
           </div>
         </div>
 
@@ -507,8 +515,8 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-        <button class="btn btn-primary" id="batch-save-btn">Save</button>
+        <button class="btn btn-secondary" data-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-primary" id="batch-save-btn" data-i18n="common.save">Save</button>
       </div>
     </div>
   </div>
@@ -521,7 +529,7 @@
     <div class="modal-content">
 
       <div class="modal-header">
-        <h5 class="modal-title">Edit Schedule Item</h5>
+        <h5 class="modal-title" data-i18n="item.title">Edit Schedule Item</h5>
         <button type="button" class="close" data-dismiss="modal">&times;</button>
       </div>
 
@@ -531,7 +539,7 @@
 
         <!-- CHANNEL FIRST -->
         <div class="form-group">
-          <label for="edit-channel">Channel</label>
+          <label for="edit-channel" data-i18n="item.channel">Channel</label>
           <select class="form-control" id="edit-channel"></select>
         </div>
 
@@ -542,33 +550,32 @@
           <div id="collapse-duty" class="mb-2">
             <!-- Numeric duty input (kept for analog/softstart modes) -->
             <div class="form-group collapse show" id="edit-duty-numeric-group">
-              <label for="edit-duty">Duty Cycle (%)</label>
+              <label for="edit-duty" data-i18n="item.duty">Duty Cycle (%)</label>
               <input type="number" class="form-control" id="edit-duty" min="0" max="100" step="1">
             </div>
 
             <!-- No-ramp toggler (on/off) -->
             <div class="form-group collapse" id="edit-duty-toggle-group">
-              <label for="edit-duty-toggle">State</label>
+              <label for="edit-duty-toggle" data-i18n="item.state">State</label>
               <div class="custom-control custom-switch">
                 <input type="checkbox" class="custom-control-input" id="edit-duty-toggle"
                   aria-describedby="edit-duty-toggle-label">
                 <label class="custom-control-label" id="edit-duty-toggle-label" for="edit-duty-toggle">Off</label>
               </div>
-              <small class="form-text text-muted">Use this toggle for outputs that only support ON/OFF (no
-                ramp).</small>
+              <small class="form-text text-muted" data-i18n="item.state_hint">Use this toggle for outputs that only support ON/OFF (no ramp).</small>
             </div>
           </div>
 
           <!-- RISE COLLAPSE -->
           <div id="collapse-rise" class="collapse">
             <div class="form-group">
-              <label for="edit-rise">Rise Time</label>
+              <label for="edit-rise" data-i18n="item.rise">Rise Time</label>
               <div class="d-flex">
                 <input type="number" class="form-control" id="edit-rise" min="0" step="0.1" style="max-width:120px;">
                 <select id="edit-rise-unit" class="form-control ml-2" style="max-width:100px;">
-                  <option value="ms">ms</option>
-                  <option value="s">s</option>
-                  <option value="m">min</option>
+                  <option value="ms" data-i18n="unit.ms">ms</option>
+                  <option value="s" data-i18n="unit.sec">s</option>
+                  <option value="m" data-i18n="unit.min">min</option>
                 </select>
               </div>
             </div>
@@ -577,13 +584,13 @@
           <!-- FALL COLLAPSE -->
           <div id="collapse-fall" class="collapse">
             <div class="form-group">
-              <label for="edit-fall">Fall Time</label>
+              <label for="edit-fall" data-i18n="item.fall">Fall Time</label>
               <div class="d-flex">
                 <input type="number" class="form-control" id="edit-fall" min="0" step="0.1" style="max-width:120px;">
                 <select id="edit-fall-unit" class="form-control ml-2" style="max-width:100px;">
-                  <option value="ms">ms</option>
-                  <option value="s">s</option>
-                  <option value="m">min</option>
+                  <option value="ms" data-i18n="unit.ms">ms</option>
+                  <option value="s" data-i18n="unit.sec">s</option>
+                  <option value="m" data-i18n="unit.min">min</option>
                 </select>
               </div>
             </div>
@@ -593,15 +600,15 @@
 
         <!-- COMMON MACHINEEVENT FIELDS -->
         <div class="form-group">
-          <label>Trigger Time</label>
+          <label data-i18n="item.trigger">Trigger Time</label>
           <div class="d-flex flex-nowrap align-items-center">
             <input type="time" class="form-control mr-2" id="edit-time" style="max-width:140px;">
             <div id="after-days-group" class="ml-2">
               <div class="d-flex flex-nowrap align-items-center">
-                <span class="mx-1">After</span>
+                <span class="mx-1" data-i18n="item.after">After</span>
                 <input type="number" class="form-control mx-1" id="edit-after-days" min="0" step="1" value="0"
                   style="max-width:80px;">
-                <span class="mx-1">Days</span>
+                <span class="mx-1" data-i18n="item.days">Days</span>
               </div>
             </div>
           </div>
@@ -609,22 +616,22 @@
 
         <!-- Custom cycle only: start offset after the task starts -->
         <div class="form-group" id="edit-offset-group" style="display:none;">
-          <label for="edit-offset-h">Start offset after the task starts</label>
+          <label for="edit-offset-h" data-i18n="item.offset_hint">Start offset after the task starts</label>
           <div class="d-flex flex-nowrap align-items-center">
             <input type="number" class="form-control" id="edit-offset-h" min="0" max="23" inputmode="numeric" style="max-width:90px;">
-            <span class="mx-2">h</span>
+            <span class="mx-2" data-i18n="unit.h">h</span>
             <input type="number" class="form-control" id="edit-offset-m" min="0" max="59" inputmode="numeric" style="max-width:90px;">
-            <span class="mx-2">min</span>
+            <span class="mx-2" data-i18n="unit.min">min</span>
           </div>
         </div>
 
         <!-- REPEAT -->
         <div class="form-group">
-          <label for="edit-repeat">Repeat</label>
+          <label for="edit-repeat" data-i18n="common.repeat">Repeat</label>
           <select class="form-control" id="edit-repeat">
-            <option value="daily">Every Day</option>
-            <option value="custom">Custom</option>
-            <option value="once">Once</option>
+            <option value="daily" data-i18n="sch.repeat_daily">Every Day</option>
+            <option value="custom" data-i18n="sch.repeat_custom">Custom</option>
+            <option value="once" data-i18n="sch.repeat_once">Once</option>
           </select>
         </div>
 
@@ -633,33 +640,33 @@
 
           <!-- ON row -->
           <div class="form-group d-flex align-items-center mb-2">
-            <label class="mr-3 mb-0" style="width:40px;">On</label>
+            <label class="mr-3 mb-0" style="width:40px;" data-i18n="common.on">On</label>
 
             <div class="d-flex align-items-center mr-3">
               <input type="number" class="form-control" id="edit-on-min" min="0" max="59" value="0" style="width:70px;">
-              <span class="ml-1">min</span>
+              <span class="ml-1" data-i18n="unit.min">min</span>
             </div>
 
             <div class="d-flex align-items-center">
               <input type="number" class="form-control" id="edit-on-sec" min="0" max="59" value="0" style="width:70px;">
-              <span class="ml-1">sec</span>
+              <span class="ml-1" data-i18n="unit.sec">sec</span>
             </div>
           </div>
 
           <!-- OFF row -->
           <div class="form-group d-flex align-items-center">
-            <label class="mr-3 mb-0" style="width:40px;">Off</label>
+            <label class="mr-3 mb-0" style="width:40px;" data-i18n="common.off">Off</label>
 
             <div class="d-flex align-items-center mr-3">
               <input type="number" class="form-control" id="edit-off-min" min="0" max="59" value="0"
                 style="width:70px;">
-              <span class="ml-1">min</span>
+              <span class="ml-1" data-i18n="unit.min">min</span>
             </div>
 
             <div class="d-flex align-items-center">
               <input type="number" class="form-control" id="edit-off-sec" min="0" max="59" value="0"
                 style="width:70px;">
-              <span class="ml-1">sec</span>
+              <span class="ml-1" data-i18n="unit.sec">sec</span>
             </div>
           </div>
 
@@ -669,15 +676,15 @@
         <div class="form-group">
           <div class="custom-control custom-switch">
             <input type="checkbox" class="custom-control-input" id="edit-enabled">
-            <label class="custom-control-label" for="edit-enabled">Enabled</label>
+            <label class="custom-control-label" for="edit-enabled" data-i18n="common.enabled">Enabled</label>
           </div>
         </div>
 
       </div>
 
       <div class="modal-footer">
-        <button id="modal-cancel-btn" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-        <button id="save-edit" class="btn btn-primary">Save</button>
+        <button id="modal-cancel-btn" class="btn btn-secondary" data-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+        <button id="save-edit" class="btn btn-primary" data-i18n="common.save">Save</button>
       </div>
 
     </div>
@@ -690,21 +697,21 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Save Task</h5>
+        <h5 class="modal-title" data-i18n="save.title">Save Task</h5>
         <button type="button" class="close" data-dismiss="modal">&times;</button>
       </div>
       <div class="modal-body">
         <p id="save-as-hint" class="text-muted"></p>
         <div class="form-group">
-          <label for="new-task-name">Task Name</label>
-          <input type="text" class="form-control" id="new-task-name" placeholder="e.g. Summer Growth" maxlength="32">
+          <label for="new-task-name" data-i18n="save.task_name">Task Name</label>
+          <input type="text" class="form-control" id="new-task-name" placeholder="e.g. Summer Growth" data-i18n-ph="save.name_ph" maxlength="32">
         </div>
         <div id="save-as-error" class="text-danger mt-1" style="display:none;"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-        <button class="btn btn-outline-primary" id="save-as-new">Save as new</button>
-        <button class="btn btn-primary" id="save-as-confirm">Save</button>
+        <button class="btn btn-secondary" data-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-outline-primary" id="save-as-new" data-i18n="save.as_new">Save as new</button>
+        <button class="btn btn-primary" id="save-as-confirm" data-i18n="common.save">Save</button>
       </div>
     </div>
   </div>
@@ -715,15 +722,15 @@
   <div class="modal-dialog modal-dialog-centered modal-sm">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Delete schedule?</h5>
+        <h5 class="modal-title" data-i18n="del.title">Delete schedule?</h5>
       </div>
       <div class="modal-body">
-        <p>"<span id="delete-task-name"></span>" will be deleted.</p>
-        <p id="delete-running-hint" class="text-danger">It is running now and will be stopped.</p>
+        <p id="delete-text"></p>
+        <p id="delete-running-hint" class="text-danger" data-i18n="del.running">It is running now and will be stopped.</p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-        <button class="btn btn-danger" id="delete-confirm">Delete</button>
+        <button class="btn btn-secondary" data-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-danger" id="delete-confirm" data-i18n="common.delete">Delete</button>
       </div>
     </div>
   </div>
@@ -736,54 +743,54 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="stage-title">Stage</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">&times;</button>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" data-i18n-aria="common.close">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label for="stage-name">Name</label>
+          <label for="stage-name" data-i18n="common.name">Name</label>
           <input type="text" class="form-control" id="stage-name" maxlength="24"
-                 placeholder="e.g. Germination" autocomplete="off" autocapitalize="sentences" spellcheck="false">
+                 placeholder="e.g. Germination" data-i18n-ph="stage.name_ph" autocomplete="off" autocapitalize="sentences" spellcheck="false">
         </div>
         <div class="form-group">
-          <label>Length</label>
+          <label data-i18n="stage.length">Length</label>
           <div class="d-flex align-items-center">
             <input type="number" class="form-control" id="stage-days" min="0" max="365" style="width:90px;">
-            <span class="mx-2">days</span>
+            <span class="mx-2" data-i18n="unit.days">days</span>
             <input type="number" class="form-control" id="stage-hours" min="0" max="23" style="width:80px;">
-            <span class="ml-2">hours</span>
+            <span class="ml-2" data-i18n="unit.hours">hours</span>
           </div>
           <small class="text-muted" id="stage-len-hint"></small>
         </div>
         <div class="form-group" id="stage-end-group">
-          <label>At its end</label>
+          <label data-i18n="stage.at_end">At its end</label>
           <div class="custom-control custom-radio">
             <input type="radio" id="stage-end-next" name="stage-end" class="custom-control-input" value="next">
-            <label class="custom-control-label" for="stage-end-next">Go on to the next stage</label>
+            <label class="custom-control-label" for="stage-end-next" data-i18n="stage.end_next">Go on to the next stage</label>
           </div>
           <div class="custom-control custom-radio">
             <input type="radio" id="stage-end-pause" name="stage-end" class="custom-control-input" value="pause">
-            <label class="custom-control-label" for="stage-end-pause">Pause until Continue, with a message</label>
+            <label class="custom-control-label" for="stage-end-pause" data-i18n="stage.end_pause">Pause until Continue, with a message</label>
           </div>
           <input type="text" class="form-control mt-2" id="stage-message" maxlength="60"
-                 placeholder="e.g. Remove the covers" autocomplete="off" autocapitalize="sentences">
+                 placeholder="e.g. Remove the covers" data-i18n-ph="stage.message_ph" autocomplete="off" autocapitalize="sentences">
         </div>
         <div class="form-group mb-0" id="stage-move-group">
-          <button type="button" class="btn btn-outline-secondary btn-small mr-2" id="stage-up">Move earlier</button>
-          <button type="button" class="btn btn-outline-secondary btn-small" id="stage-down">Move later</button>
+          <button type="button" class="btn btn-outline-secondary btn-small mr-2" id="stage-up" data-i18n="stage.move_earlier">Move earlier</button>
+          <button type="button" class="btn btn-outline-secondary btn-small" id="stage-down" data-i18n="stage.move_later">Move later</button>
         </div>
         <div id="stage-error" class="text-danger small mt-2" style="display:none;"></div>
         <div id="stage-delete-confirm" class="alert alert-danger mt-3 mb-0 d-none">
           <div id="stage-delete-text"></div>
           <div class="text-right mt-2">
-            <button type="button" class="btn btn-secondary btn-small mr-2" id="stage-delete-cancel">Keep it</button>
-            <button type="button" class="btn btn-danger btn-small" id="stage-delete-ok">Delete</button>
+            <button type="button" class="btn btn-secondary btn-small mr-2" id="stage-delete-cancel" data-i18n="stage.keep">Keep it</button>
+            <button type="button" class="btn btn-danger btn-small" id="stage-delete-ok" data-i18n="common.delete">Delete</button>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-danger mr-auto" id="stage-delete-btn">Delete</button>
-        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="stage-save-btn">OK</button>
+        <button type="button" class="btn btn-outline-danger mr-auto" id="stage-delete-btn" data-i18n="common.delete">Delete</button>
+        <button type="button" class="btn btn-secondary" data-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="stage-save-btn" data-i18n="common.ok">OK</button>
       </div>
     </div>
   </div>
@@ -794,14 +801,12 @@
   <div class="modal-dialog modal-dialog-centered modal-sm">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="exit-title">Leave control panel?</h5>
+        <h5 class="modal-title" id="exit-title" data-i18n="exit.title">Leave control panel?</h5>
       </div>
-      <div class="modal-body">
-        The farm keeps running on its schedule. Your control session will be released.
-      </div>
+      <div class="modal-body" data-i18n="exit.text">The farm keeps running on its schedule. Your control session will be released.</div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="exit-stay-btn">Stay</button>
-        <button class="btn btn-danger" id="exit-leave-btn">Leave</button>
+        <button class="btn btn-secondary" id="exit-stay-btn" data-i18n="exit.stay">Stay</button>
+        <button class="btn btn-danger" id="exit-leave-btn" data-i18n="exit.leave">Leave</button>
       </div>
     </div>
   </div>
@@ -811,16 +816,16 @@
   <div class="modal-dialog modal-dialog-centered modal-sm">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="pick-title">Choose</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">&times;</button>
+        <h5 class="modal-title" id="pick-title" data-i18n="common.choose">Choose</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" data-i18n-aria="common.close">&times;</button>
       </div>
       <div class="modal-body p-0">
         <div id="pick-list" class="list-group list-group-flush"></div>
         <div id="pick-confirm" class="p-3 d-none">
           <div id="pick-question" class="mb-3"></div>
           <div class="text-right">
-            <button type="button" class="btn btn-secondary btn-small mr-2" id="pick-cancel">Back</button>
-            <button type="button" class="btn btn-success btn-small" id="pick-ok">Yes</button>
+            <button type="button" class="btn btn-secondary btn-small mr-2" id="pick-cancel" data-i18n="common.back">Back</button>
+            <button type="button" class="btn btn-success btn-small" id="pick-ok" data-i18n="common.yes">Yes</button>
           </div>
         </div>
       </div>

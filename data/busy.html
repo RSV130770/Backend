@@ -1,87 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>PremiFarm Status</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- Bootstrap CSS -->
-  <link rel="stylesheet" href="/bootstrap.min.css">
-  <style>
-    body {
-      background-color: #f8f9fa;
-      font-family: 'Segoe UI', sans-serif;
-    }
-    .status-card {
-      max-width: 400px;
-      margin: auto;
-      margin-top: 10vh;
-    }
-    .timeOut-value {
-      font-size: 2.5rem;
-      font-weight: bold;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title data-i18n="fw.busy_title">Device is busy</title>
+<!--
+  Shown by the controller (/busy) while another user holds the control
+  session. Stand-alone: no jQuery, no app.js.
+  Texts: English here, translated from /local.json (fw.* keys) in the
+  farm's language (/api/lang); never chosen -> the phone's language.
+  Polls /api/session and opens the control panel as soon as it is free.
+-->
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       display:flex;align-items:center;justify-content:center;
+       min-height:100vh;margin:0;background:#f0f4f8;}
+  .card{background:#fff;border-radius:12px;
+        box-shadow:0 4px 24px rgba(0,0,0,.10);
+        padding:2rem;width:min(320px,90vw);text-align:center;}
+  h2{font-size:1.1rem;color:#1a1a2e;margin:.5rem 0 1.25rem;}
+  .spin{width:48px;height:48px;margin:0 auto;border:5px solid #d6e4f5;
+        border-top-color:#007bff;border-radius:50%;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  p{font-size:.85rem;color:#666;margin-top:1rem;}
+</style>
 </head>
 <body>
-  <div class="card status-card shadow">
-    <div class="card-header text-center bg-primary text-white">
-      PremiFarm Status
-    </div>
-    <div class="card-body text-center">
-      <!-- Busy spinner -->
-      <div id="busyIndicator" class="mb-3">
-        <div class="spinner-border text-primary" role="status">
-          <span class="sr-only">Busy...</span>
-        </div>
-        <p class="mt-2">Device is busy</p>
-      </div>
-
-      <!-- Countdown value -->
-      <div>
-        <p>Remains:</p>
-        <div id="timeOut" class="timeOut-value text-danger">--</div>
-      </div>
-    </div>
-  </div>
-<form id="sessionForm" method="POST" action="/resume">
-  <input type="hidden" name="key" value="<%= sessionKey %>">
-  <input type="hidden" name="encodedPass" value="<%= encodedPass %>">
-</form>
-
-
-  <!-- jQuery -->
-  <script src="/jquery.js"></script>
-  <!-- Bootstrap JS -->
-  <script src="/bootstrap.js"></script>
-
-  <script>
-
-function poll() {
-  $.ajax({
-    url: "/status",
-    method: "GET",
-    dataType: "json",
-    timeout: 1000,
-    success: function(res) {
-      // res = { busy:true/false, timeOut:NN, isConnected:true/false }
-      const val = parseInt(res.timeOut, 10);
-      document.getElementById("timeOut").textContent =
-        isNaN(val) ? "--" : val;
-
-      // When busy and timeout reaches zero → redirect with params
-      if (res.busy && val === 0) {
-        const key = document.getElementById("sessionKey").value;
-        const pass = document.getElementById("encodedPass").value;
-        // Redirect to /quar with query parameters
-        window.location.href = "/quar?key=" + encodeURIComponent(key) +
-                               "&pass=" + encodeURIComponent(pass);
-      }
-    },
-    error: function() {
-      console.log("poll failed");
+<div class="card">
+  <h2 data-i18n="fw.busy_title">Device is busy</h2>
+  <div class="spin" role="status" aria-label="Waiting"></div>
+  <p><span data-i18n="fw.busy_text">Another user is controlling the device.</span><br>
+     <span data-i18n="fw.busy_wait">The control panel opens automatically when it is free.</span></p>
+</div>
+<script>
+// Texts in the farm's language; a missing file keeps the English above
+function translate() {
+  const texts = fetch('/local.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  const farm = fetch('/api/lang', {cache: 'no-store'}).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  Promise.all([texts, farm]).then(([d, f]) => {
+    if (!d || !d.text) return;
+    const codes = (d.languages || []).map(l => l.code);
+    let lang = f && f.lang;
+    if (!codes.includes(lang)) {
+      const wanted = navigator.languages || [navigator.language || ''];
+      lang = wanted.map(l => String(l).slice(0, 2).toLowerCase()).find(c => codes.includes(c)) ||
+             d.default || 'en';
     }
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const e = d.text[el.getAttribute('data-i18n')];
+      if (e && e[lang]) el.textContent = e[lang];
+    });
   });
 }
-setInterval(poll, 1000);
 
+function poll() {
+  fetch('/api/session', {cache: 'no-store'}).then(r => r.json()).then(d => {
+    if (!d.busy) { location.replace('/'); return; }
+    setTimeout(poll, 2000);
+  }).catch(() => setTimeout(poll, 3000));
+}
+
+translate();
+poll();
+</script>
+</body>
+</html>

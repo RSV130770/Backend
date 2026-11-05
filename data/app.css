@@ -825,3 +825,42 @@ html, body {
 #stageModal {
   z-index: 3000 !important;    /* above the raised .modal-backdrop (2950) */
 }
+
+/* Language flag buttons (Settings, drawn by i18n.js). They use the site's
+   button style (btn btn-light btn-small); here only the layout: three
+   buttons of the same size across the whole width, flag above the name.
+   Flexbox with margins (no grid, no gap) also works in older phone browsers. */
+.lang-flags {
+  display: flex;
+}
+.lang-flags .lang-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 68px;                /* easy to hit with a finger */
+  padding: 8px 4px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.lang-flags .lang-btn:first-child {
+  margin-left: 0;
+}
+.lang-flags .lang-btn svg {
+  display: block;
+  width: 36px;                     /* every flag in the same 3:2 box */
+  height: 24px;
+  margin-bottom: 6px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);   /* the white stripes need an edge */
+}
+/* the chosen language: pressed (btn-small) and blue; specific enough to
+   win over Bootstrap's .btn-light active colours */
+.lang-flags .lang-btn.btn-light.active:not(:disabled) {
+  border-color: #007bff;
+  color: #007bff;
+  font-weight: 600;
+}

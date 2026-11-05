@@ -1,3 +1,200 @@
+/* ============================================================
+   I18N  (first partial in app.js)
+   - Texts live in /local.json: key -> {en, ru, et}.
+   - t(key, params): the text in the current language. A missing
+     translation falls back to English, a missing key to the key itself;
+     both are reported once in the console. {name} placeholders are
+     filled from params.
+   - HTML: data-i18n (text), data-i18n-ph (placeholder), data-i18n-title
+     (tooltip), data-i18n-aria (aria-label). Put data-i18n only on
+     elements without child elements: it replaces the whole text. An
+     element keeps its built-in English text if the file is missing.
+   - The choice is kept per farm, in the controller's RTC memory
+     (GET/POST /api/lang). Never chosen yet: the phone's language if
+     there is a translation, else English. The phone keeps a copy
+     (localStorage) for when the controller cannot be reached.
+   - onLanguageChange(fn): screens that build text in JS redraw it there.
+   - #lang-flags (Settings) gets one flag button per language.
+   ============================================================ */
+
+const I18N_STORE = "premifarm.lang";
+const I18N = { lang: "en", def: "en", langs: [], text: {}, loaded: false, farm: "" };
+const i18nWarned = new Set();
+const i18nHooks = [];
+
+function i18nWarn(msg) {
+  if (i18nWarned.has(msg)) return;
+  i18nWarned.add(msg);
+  console.warn("i18n: " + msg);
+}
+
+function t(key, params) {
+  const e = I18N.text[key];
+  let s;
+  if (!e) {
+    if (I18N.loaded) i18nWarn("missing key " + key);
+    s = key;
+  } else {
+    s = e[I18N.lang];
+    if (!s) {
+      i18nWarn("no " + I18N.lang + " text for " + key);
+      s = e[I18N.def] || e.en || key;
+    }
+  }
+  if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in params ? String(params[k]) : m));
+  return s;
+}
+
+function hasText(key) { return !!I18N.text[key]; }
+
+// Names written by the controller in English (the built-in Default task:
+// its name, stages, groups, messages) are shown in the chosen language.
+// Any other name (typed by the user) is shown as it is.
+let i18nNames = null;               // English text -> key, for tpl.* keys
+function tName(s) {
+  if (!s) return s || "";
+  if (!i18nNames) {
+    i18nNames = {};
+    Object.keys(I18N.text).forEach(k => {
+      if (k.startsWith("tpl.") && I18N.text[k].en) i18nNames[I18N.text[k].en] = k;
+    });
+  }
+  const key = i18nNames[s];
+  return key ? t(key) : s;
+}
+
+// Output name: translated while it is the controller's standard English
+// name for that channel (out.<id>); a renamed output keeps its own name
+function outLabel(cfg) {
+  if (!cfg) return "";
+  const e = I18N.text["out." + cfg.id];
+  return e && e.en === cfg.label ? t("out." + cfg.id) : (cfg.label || "Ch" + cfg.id);
+}
+
+// Fill the data-i18n* attributes inside root (default: the whole page)
+function applyI18n(root) {
+  const scope = root || document;
+  const fill = (attr, put) => scope.querySelectorAll("[" + attr + "]").forEach(el => {
+    const key = el.getAttribute(attr);
+    if (hasText(key)) put(el, t(key));
+  });
+  fill("data-i18n", (el, s) => { el.textContent = s; });
+  fill("data-i18n-ph", (el, s) => { el.placeholder = s; });
+  fill("data-i18n-title", (el, s) => { el.title = s; });
+  fill("data-i18n-aria", (el, s) => { el.setAttribute("aria-label", s); });
+}
+
+function onLanguageChange(fn) { i18nHooks.push(fn); }
+
+function setLanguage(code) {
+  if (!I18N.langs.some(l => l.code === code)) return;
+  I18N.lang = code;
+  try { localStorage.setItem(I18N_STORE, code); } catch (e) { /* private mode */ }
+  saveFarmLanguage(code);
+  document.documentElement.lang = code;
+  applyI18n();
+  renderLangButtons();
+  i18nHooks.forEach(fn => { try { fn(code); } catch (e) { console.error(e); } });
+}
+
+// The farm keeps the choice (RTC memory); only the session owner can
+// change it. Not reachable (demo mode): the phone's copy is enough.
+function saveFarmLanguage(code) {
+  if (typeof OFFLINE_MODE !== "undefined" && OFFLINE_MODE) return;
+  if (code === I18N.farm) return;
+  fetch("/api/lang", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lang: code })
+  })
+    .then(r => { if (r.ok) I18N.farm = code; else console.warn("i18n: language not saved on the farm (HTTP " + r.status + ")"); })
+    .catch(() => console.warn("i18n: language not saved on the farm"));
+}
+
+function i18nPick() {
+  const codes = I18N.langs.map(l => l.code);
+  if (I18N.farm && codes.includes(I18N.farm)) return I18N.farm;   // the farm's choice
+  let saved = null;
+  try { saved = localStorage.getItem(I18N_STORE); } catch (e) { /* private mode */ }
+  if (saved && codes.includes(saved)) return saved;
+  const wanted = navigator.languages || [navigator.language || ""];
+  for (const l of wanted) {
+    const c = String(l).slice(0, 2).toLowerCase();
+    if (codes.includes(c)) return c;
+  }
+  return I18N.def;
+}
+
+/* ---------- flag buttons ---------- */
+// Drawn here, not emoji: Windows shows emoji flags as two letters
+const I18N_FLAGS = {
+  en: '<svg viewBox="0 0 60 30" preserveAspectRatio="xMidYMid slice" aria-hidden="true">' +
+      '<clipPath id="ukT"><path d="M30,15h30v15zv15h-30zh-30v-15zv-15h30z"/></clipPath>' +
+      '<path d="M0,0v30h60v-30z" fill="#012169"/>' +
+      '<path d="M0,0L60,30M60,0L0,30" stroke="#fff" stroke-width="6"/>' +
+      '<path d="M0,0L60,30M60,0L0,30" clip-path="url(#ukT)" stroke="#C8102E" stroke-width="4"/>' +
+      '<path d="M30,0v30M0,15h60" stroke="#fff" stroke-width="10"/>' +
+      '<path d="M30,0v30M0,15h60" stroke="#C8102E" stroke-width="6"/></svg>',
+  ru: '<svg viewBox="0 0 9 6" preserveAspectRatio="none" aria-hidden="true">' +
+      '<rect width="9" height="2" fill="#fff"/><rect y="2" width="9" height="2" fill="#0039A6"/>' +
+      '<rect y="4" width="9" height="2" fill="#D52B1E"/></svg>',
+  et: '<svg viewBox="0 0 33 21" preserveAspectRatio="none" aria-hidden="true">' +
+      '<rect width="33" height="7" fill="#0072CE"/><rect y="7" width="33" height="7" fill="#000"/>' +
+      '<rect y="14" width="33" height="7" fill="#fff"/></svg>'
+};
+
+function renderLangButtons() {
+  const box = document.getElementById("lang-flags");
+  if (!box || !I18N.langs.length) return;
+  box.innerHTML = "";
+  I18N.langs.forEach(l => {
+    const b = document.createElement("button");
+    b.type = "button";
+    // Same look as the other buttons: btn + btn-small (raised, pressed when active)
+    b.className = "btn btn-light btn-small lang-btn" + (l.code === I18N.lang ? " active" : "");
+    b.setAttribute("aria-pressed", l.code === I18N.lang ? "true" : "false");
+    b.dataset.lang = l.code;
+    b.innerHTML = (I18N_FLAGS[l.code] || "") + "<span></span>";
+    b.querySelector("span").textContent = l.name;       // the language's own name
+    b.addEventListener("click", () => setLanguage(l.code));
+    box.appendChild(b);
+  });
+  const card = box.closest(".card");
+  if (card) card.style.display = "";                    // hidden until there are languages
+}
+
+/* ---------- loading ---------- */
+// The app starts after this (system.js waits for I18N_READY); a missing or
+// broken file leaves the built-in English texts in place.
+const I18N_READY = new Promise(resolve => {
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    I18N.lang = i18nPick();
+    document.documentElement.lang = I18N.lang;
+    const go = () => { applyI18n(); renderLangButtons(); resolve(); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go);
+    else go();
+  };
+  const timer = setTimeout(() => { console.warn("i18n: /local.json timed out"); done(); }, 8000);
+  // The farm's language ("" = never chosen); an old firmware without
+  // /api/lang, or no controller at all, just leaves it empty
+  const farmLang = fetch("/api/lang", { cache: "no-store" })
+    .then(r => (r.ok ? r.json() : {}))
+    .then(d => { I18N.farm = (d && d.lang) || ""; })
+    .catch(() => {});
+  const texts = fetch("/local.json", { cache: "no-cache" })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(d => {
+      I18N.text = d.text || {};
+      I18N.langs = d.languages || [];
+      I18N.def = d.default || "en";
+      I18N.loaded = true;
+    })
+    .catch(e => console.warn("i18n: /local.json not loaded (" + e.message + "), English only"));
+  Promise.all([texts, farmLang]).then(() => { clearTimeout(timer); done(); });
+});
 //* ============================================================ 
 // GLOBAL RESOURCE 
 //==============================================================
@@ -144,7 +341,8 @@ function updateDateTime() {
 /* ============================================================
    APP STARTUP
    ============================================================ */
-detectOfflineMode().then(isOffline => {
+// Texts (i18n.js) and the controller check run side by side
+Promise.all([detectOfflineMode(), I18N_READY]).then(([isOffline]) => {
   if (isOffline) {
     console.warn("Backend unreachable → switching to OFFLINE_MODE");
     OFFLINE_MODE = true;
@@ -319,6 +517,15 @@ let servicePauseByPlayground = false;
 let sliderActive = false;
 
 function disableSwipe() { swipeEnabled = false; }
+
+// iPhone: the screen keyboard stays up (or comes back on the next tap) while
+// a text field that is no longer on screen still has the focus: after a
+// swipe to another screen, or after a dialog with a field was closed.
+// Take the focus away from such a field when the screen or a dialog changes.
+function dropTextFocus() {
+  const el = document.activeElement;
+  if (el && el !== document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) el.blur();
+}
 function enableSwipe() { swipeEnabled = true; }
 
 /* ============================================================
@@ -331,6 +538,8 @@ function showPage(name) {
   if ($('.modal.show').length > 0) return;
   const index = pageOrder.indexOf(name);
   if (index === -1) return;
+
+  dropTextFocus();                    // the old screen's field must not keep the keyboard
 
   // capture previous BEFORE updating
   const previous = currentPage;
@@ -419,6 +628,9 @@ function updateDots(index) {
    DOM READY — ALL EVENT BINDINGS
    ============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
+
+  // Any dialog closing: its fields must not keep the keyboard (iPhone)
+  $(document).on('hide.bs.modal', '.modal', dropTextFocus);
 
   /* Modal swipe disable + lastMode reset on close */
   $('#batchModal').on('shown.bs.modal', disableSwipe);
@@ -569,7 +781,7 @@ let presetListLoading = false;
 
 function loadPresetList(attempt) {
   presetListLoading = true;
-  $("#taskSelectLabel").text(attempt > 1 ? `Loading task list (try ${attempt})...` : "Loading task list...");
+  $("#taskSelectLabel").text(attempt > 1 ? t("dash.task_list_loading_try", { n: attempt }) : t("dash.task_list_loading"));
   $.ajax({ url: "/preset/list", dataType: "json", timeout: 8000 }).done(raw => {
     presetListLoading = false;
 
@@ -590,14 +802,14 @@ function loadPresetList(attempt) {
     // The controller's selected preset (running or not, kept in its RTC
     // memory); the template if that preset does not exist
     const selected = raw.current ? raw.current.presetId : 0;
-    taskIndex = tasks.some(t => t.index === selected) ? selected : 0;
+    taskIndex = tasks.some(x => x.index === selected) ? selected : 0;
 
       
     // Populate dropdown
     const select = $("#taskSelect");
     select.empty();
-    tasks.forEach(t => {
-      select.append($('<option>').val(t.index).text(t.name));   // name as plain text
+    tasks.forEach(x => {
+      select.append($('<option>').val(x.index).text(x.name));   // name as plain text
     });
     select.val(taskIndex);
 
@@ -619,8 +831,9 @@ function loadPresetList(attempt) {
     presetListLoading = false;
     // Show why, and let the user try again with a tap
     const why = xhr.status ? `error ${xhr.status}` : textStatus;
-    $("#taskSelectLabel")
-      .html(`Task list unavailable (${why}). <a href="#" id="taskListRetry">Retry</a>`);
+    $("#taskSelectLabel").empty()
+      .append(document.createTextNode(t("dash.task_list_unavailable", { reason: why }) + " "))
+      .append($('<a href="#" id="taskListRetry"></a>').text(t("common.retry")));
     $("#taskListRetry").one("click", e => { e.preventDefault(); loadPresetList(1); });
   });
 }
@@ -677,29 +890,29 @@ function updateTaskUI(status) {
   // Task tile: the name; until the list arrives the label shows
   // "Loading..." or the retry link put there by loadPresetList()
   if (taskList.length) {
-    const task = taskList.find(t => t.index === taskIndex);
-    $("#taskSelectLabel").text(task ? task.name : "Unknown");
+    const task = taskList.find(x => x.index === taskIndex);
+    $("#taskSelectLabel").text(task ? tName(task.name) : t("common.unknown"));
   }
-  const since = taskStartTime ? " since " + tileTime(taskStartTime) : "";
   const line = {
-    running:  "Running" + since,
-    paused:   "Paused",
-    frozen:   "Waiting",
-    finished: "Finished"
-  }[status] || "Stopped";
+    running:  taskStartTime ? t("dash.status_running_since", { time: tileTime(taskStartTime) })
+                            : t("dash.status_running"),
+    paused:   t("dash.status_paused"),
+    frozen:   t("dash.status_waiting"),
+    finished: t("dash.status_finished")
+  }[status] || t("dash.status_stopped");
   $("#taskStatusLabel").text(line);
   $("#taskTile").attr("data-status", status);
 
   // Stage-end banner
   $("#pause-banner").toggleClass("d-none", status !== "frozen");
-  $("#pause-message").text(pauseMessage || "");
+  $("#pause-message").text(tName(pauseMessage || ""));
   updateMessagesCard();
 
   // Buttons. Pause becomes Resume while paused.
   const active = status === "running" || status === "paused" || status === "frozen";
   $("#taskStart").prop("disabled", active);
   $("#taskPause").prop("disabled", status !== "running" && status !== "paused")
-    .attr("title", status === "paused" ? "Resume" : "Pause")
+    .attr("title", t(status === "paused" ? "dash.btn_resume" : "dash.btn_pause"))
     .find("path").attr("d", status === "paused" ? RESUME_ICON : PAUSE_ICON);
   $("#taskStop").prop("disabled", !active);
 
@@ -723,17 +936,24 @@ function buildDashboard() {
           <div class="pic" style="${o.style || ''}">
             <img src="${o.icon || '/sun.svg'}" style="${invertStyle}" width="28" height="28">
           </div>
-          <div><strong>${o.label}</strong></div>
+          <div><strong class="out-label"></strong></div>
         </div>
 
         <div class="text-right">
           <div class="value-big" id="out_${o.id}_value">--%</div>
-          <div class="countdown">Next: <span id="out_${o.id}_count">--:--</span></div>
+          <div class="countdown"><span data-i18n="dash.next_label">${_escT("dash.next_label")}</span> <span id="out_${o.id}_count">--:--</span></div>
         </div>
 
       </div>
     `);
+    // the name as plain text (it may come from the user)
+    $(container).find(`.channel-row[data-id="${o.id}"] .out-label`).text(outLabel(o));
   });
+}
+
+// t() for HTML built in a template string
+function _escT(key, params) {
+  return String(t(key, params)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 
@@ -827,8 +1047,10 @@ function followTaskStatus(s) {
 }
 
 // Text of the Message output ("" when none). OK hides it on the controller.
+let noticeText = "";
 function showNotice(text) {
-  $("#notice-text").text(text);
+  noticeText = text || "";
+  $("#notice-text").text(tName(noticeText));
   $("#notice-banner").toggleClass("d-none", !text);
   updateMessagesCard();
 }
@@ -838,8 +1060,9 @@ function showNotice(text) {
 let shownMessages = "";
 function updateMessagesCard() {
   const texts = [];
-  if (!$("#pause-banner").hasClass("d-none")) texts.push("P:" + $("#pause-message").text());
-  if (!$("#notice-banner").hasClass("d-none")) texts.push("N:" + $("#notice-text").text());
+  // the texts as the controller sends them, so a language change is no new message
+  if (!$("#pause-banner").hasClass("d-none")) texts.push("P:" + pauseMessage);
+  if (!$("#notice-banner").hasClass("d-none")) texts.push("N:" + noticeText);
   $("#msg-count").text(texts.length).toggleClass("d-none", texts.length === 0);
   $("#no-messages").toggleClass("d-none", texts.length > 0);
   const key = texts.join("\n");
@@ -917,7 +1140,7 @@ function fetchState(force) {
 
 // Render RTC + sensors only
 function renderDashboard(s) {
-  $("#rtc").text("Time: " + (s.rtc || "--"));
+  $("#rtc").text(t("dash.time", { time: s.rtc || "--" }));
 
   $("#w_temp").text(s.w_temp ?? "--");
   $("#w_temp_bar").css("width", (s.w_temp ?? 0) + "%");
@@ -928,7 +1151,7 @@ function renderDashboard(s) {
   $("#a_hum").text(s.a_hum ?? "--");
   $("#a_hum_bar").css("width", (s.a_hum ?? 0) + "%");
 
-  $("#level").text(s.Level ?? "--");
+  $("#level").text(s.Level ?? "--");      // LOW / OK / HIGH / NOK as the controller sends them
 
   const levelWidth =
     s.Level === "LOW" ? "25%" :
@@ -988,8 +1211,8 @@ function tileTime(s) {
 // Stage length as "7 d", "21 d 12 h" or "open-ended"
 function stageLengthText(st) {
   const d = Number(st.days) || 0, h = Number(st.hours) || 0;
-  if (!d && !h) return "open-ended";
-  return (d ? d + " d" : "") + (d && h ? " " : "") + (h ? h + " h" : "");
+  if (!d && !h) return t("dash.open_ended");
+  return (d ? d + " " + t("unit.d") : "") + (d && h ? " " : "") + (h ? h + " " + t("unit.h") : "");
 }
 
 // Called with every /api/state answer
@@ -1006,24 +1229,24 @@ function updateStageState(s) {
 
 function renderStageTile() {
   const st = stageState;
-  let label = "Stage", name = "Single stage", days = "", pct = 0;
+  let label = t("dash.stage"), name = t("dash.stage_single"), days = "", pct = 0;
 
   if (st) {
-    label = `Stage ${st.index + 1}/${st.count}`;
-    name = st.name || "";
+    label = t("dash.stage_n_of", { n: st.index + 1, count: st.count });
+    name = tName(st.name || "");
     const day = Math.floor((st.elapsedMin || 0) / 1440) + 1;
     const total = st.lengthMin ? Math.ceil(st.lengthMin / 1440) : 0;
-    days = total ? `day ${day} of ${total}` : `day ${day}`;
+    days = total ? t("dash.day_of", { day: day, total: total }) : t("dash.day", { day: day });
     pct = st.lengthMin ? Math.min(100, 100 * st.elapsedMin / st.lengthMin) : 0;
   } else if (taskStatus === "finished" && stageList.length) {
-    label = `Stage ${stageList.length}/${stageList.length}`;
-    name = stageList[stageList.length - 1].name;
-    days = "done";
+    label = t("dash.stage_n_of", { n: stageList.length, count: stageList.length });
+    name = tName(stageList[stageList.length - 1].name);
+    days = t("dash.stage_done");
     pct = 100;
   } else if (stageList.length) {
-    label = `Stages: ${stageList.length}`;
-    name = stageList[0].name;
-    days = "starts with this one";
+    label = t("dash.stages_count", { count: stageList.length });
+    name = tName(stageList[0].name);
+    days = t("dash.starts_with_this");
   }
 
   $("#stageTileLabel").text(label);
@@ -1068,12 +1291,12 @@ function closePicker() {
 /* ---------- task tile ---------- */
 function openTaskPicker() {
   if (!taskList.length) return;
-  const items = taskList.map(t => ({
-    id: t.index,
-    label: t.name,
-    current: t.index === taskIndex
+  const items = taskList.map(x => ({
+    id: x.index,
+    label: tName(x.name),
+    current: x.index === taskIndex
   }));
-  openPicker("Task", items, it => {
+  openPicker(t("pick.task_title"), items, it => {
     if (it.id === taskIndex) { closePicker(); return; }
     if (!isTaskActive()) {
       // Nothing runs: just select it (the box handler tells the controller)
@@ -1081,8 +1304,9 @@ function openTaskPicker() {
       $("#taskSelect").val(it.id).trigger("change");
       return;
     }
-    const cur = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
-    askPicker(`Stop ${cur} and start ${it.label} now?`, "Start", () => {
+    const curTask = taskList.find(x => x.index === taskIndex);
+    const cur = curTask ? tName(curTask.name) : t("pick.the_task");
+    askPicker(t("pick.stop_and_start", { current: cur, next: it.label }), t("pick.btn_start"), () => {
       $("#taskSelect").val(it.id);
       requestTaskStart();
     });
@@ -1095,19 +1319,20 @@ function openStagePicker() {
   const curId = stageState ? stageState.id : null;
   const items = stageList.map((st, i) => ({
     id: st.id,
-    label: `${i + 1}. ${st.name}`,
+    label: `${i + 1}. ${tName(st.name)}`,
     sub: (st.days !== undefined || st.hours !== undefined) ? stageLengthText(st) : "",
     current: st.id === curId,
-    name: st.name
+    name: tName(st.name)
   }));
-  openPicker("Stage", items, it => {
+  openPicker(t("pick.stage_title"), items, it => {
     if (it.id === curId) { closePicker(); return; }
     if (isTaskActive()) {
-      askPicker(`Switch to ${it.name} now?`, "Switch", () => requestSetStage(it.id));
+      askPicker(t("pick.switch_to", { stage: it.name }), t("pick.btn_switch"), () => requestSetStage(it.id));
       return;
     }
-    const task = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
-    askPicker(`Start ${task} at ${it.name} now?`, "Start", () => {
+    const curTask = taskList.find(x => x.index === taskIndex);
+    const task = curTask ? tName(curTask.name) : t("pick.the_task");
+    askPicker(t("pick.start_at", { task: task, stage: it.name }), t("pick.btn_start"), () => {
       startAtStage = it.id;
       requestTaskStart();
     });
@@ -1155,6 +1380,19 @@ function initTiles() {
   });
   renderStageTile();
 }
+
+// Language changed: redraw what the Dashboard built in JS
+onLanguageChange(() => {
+  if (!initialized.dashboard) return;
+  if (!presetListLoading && taskList.length) updateTaskUI(taskStatus);
+  renderStageTile();
+  $("#outputs-dashboard .channel-row").each(function () {
+    const cfg = outputsConfig.find(c => String(c.id) === String($(this).data("id")));
+    $(this).find(".out-label").text(outLabel(cfg));
+  });
+  showNotice(noticeText);
+  if ($("#pickModal").hasClass("show")) closePicker();   // its texts were built for the old language
+});
 let currentTaskName = null;
 let lastMode = null;
 let suppressChannelChange = false;
@@ -1172,7 +1410,7 @@ function renderSchedule(list) {
 
   // A task without stages is one open-ended stage
   if (!Array.isArray(taskStages) || taskStages.length === 0)
-    taskStages = [newStage(1, 'Stage 1', 0, 0)];
+    taskStages = [newStage(1, t('sch.stage_default_name', { n: 1 }), 0, 0)];
   const known = new Set(taskStages.map(st => Number(st.id)));
   const firstStage = Number(taskStages[0].id);
 
@@ -1239,7 +1477,7 @@ function buildTreeNode(events) {
         <span class="tree-node-channels">${escapeHtml(nodeLabel)}</span>
       </div>
       <div class="tree-actions">
-        <button class="tree-edit-btn" title="Edit">✏</button>
+        <button class="tree-edit-btn" title="${escapeHtml(t('common.edit'))}" data-i18n-title="common.edit">✏</button>
       </div>
     </div>
     <div class="tree-leaves collapse" id="${collapseId}"></div>
@@ -1313,8 +1551,8 @@ function newStage(id, name, days, hours) {
 
 function stageLengthText(st) {
   const d = Number(st.days) || 0, h = Number(st.hours) || 0;
-  if (!d && !h) return 'open-ended';
-  return (d ? d + ' d' : '') + (d && h ? ' ' : '') + (h ? h + ' h' : '');
+  if (!d && !h) return t('dash.open_ended');
+  return (d ? d + ' ' + t('unit.d') : '') + (d && h ? ' ' : '') + (h ? h + ' ' + t('unit.h') : '');
 }
 
 function stageIsOpen(st) {
@@ -1343,15 +1581,15 @@ function buildStageNode(st) {
       <div class="stage-label">
         <span class="stage-num"></span><span class="stage-name"></span>
         <span class="stage-len"></span>
-        <span class="stage-pause d-none" title="Pauses at its end">⏸</span>
+        <span class="stage-pause d-none" title="${escapeHtml(t('sch.pauses_at_end'))}" data-i18n-title="sch.pauses_at_end">⏸</span>
       </div>
       <div class="tree-actions">
-        <button class="stage-add-btn" title="Add a group to this stage">+</button>
-        <button class="tree-edit-btn" title="Edit stage">✏</button>
+        <button class="stage-add-btn" title="${escapeHtml(t('sch.add_group_tip'))}" data-i18n-title="sch.add_group_tip">+</button>
+        <button class="tree-edit-btn" title="${escapeHtml(t('sch.edit_stage'))}" data-i18n-title="sch.edit_stage">✏</button>
       </div>
     </div>
     <div class="stage-groups collapse show">
-      <div class="stage-empty text-muted small">No groups yet. Tap + to add one.</div>
+      <div class="stage-empty text-muted small" data-i18n="sch.no_groups">${escapeHtml(t('sch.no_groups'))}</div>
     </div>
   </div>`);
   $s.data('stage', Object.assign({}, st, { id: Number(st.id) }));
@@ -1388,7 +1626,7 @@ function refreshStageHeaders() {
     const st = $s.data('stage');
     $s.attr('data-stage-id', st.id);
     $s.find('.stage-num').text(`${i + 1}. `);
-    $s.find('.stage-name').text(st.name || 'Stage');
+    $s.find('.stage-name').text(tName(st.name) || t('dash.stage'));
     $s.find('.stage-len').text(stageLengthText(st));
     $s.find('.stage-pause').toggleClass('d-none', !(st.endPause && !stageIsOpen(st)));
     $s.find('.stage-empty').toggle($s.find('.tree-node').length === 0);
@@ -1401,7 +1639,7 @@ function collectStages() {
     const st = $(this).data('stage');
     return {
       id: st.id,
-      name: (st.name || '').trim() || 'Stage',
+      name: (st.name || '').trim() || t('dash.stage'),
       days: Number(st.days) || 0,
       hours: Number(st.hours) || 0,
       endPause: !!st.endPause && !stageIsOpen(st),
@@ -1433,9 +1671,8 @@ function updateStageModalHints() {
   const open = !d && !h;
   const last = stageModalIsLast();
   let hint = '';
-  if (open) hint = last ? 'Open-ended: it runs until Stop.'
-                        : 'Only the last stage can be open-ended.';
-  else if (last) hint = 'The last stage: when it ends, the task is finished.';
+  if (open) hint = t(last ? 'stage.hint_open' : 'stage.hint_only_last_open');
+  else if (last) hint = t('stage.hint_last');
   $('#stage-len-hint').text(hint);
   $('#stage-end-group').toggle(!open);
   $('#stage-message').toggle($('#stage-end-pause').is(':checked'));
@@ -1446,7 +1683,7 @@ function updateStageModalHints() {
   $('#stage-up').prop('disabled', idx <= 0);
   $('#stage-down').prop('disabled', idx < 0 || idx >= $all.length - 1);
   $('#stage-delete-btn').toggle(!!stageModalNode).prop('disabled', $all.length <= 1);
-  $('#stage-title').text(stageModalNode ? `Stage ${idx + 1} of ${$all.length}` : 'New stage');
+  $('#stage-title').text(stageModalNode ? t('stage.title_n_of', { n: idx + 1, count: $all.length }) : t('stage.title_new'));
 }
 
 function openStageModal($stage) {
@@ -1495,9 +1732,9 @@ function askDeleteStage() {
   if (!stageModalNode || stageNodes().length <= 1) return;
   const st = stageModalNode.data('stage');
   const n = stageModalNode.find('.tree-node').length;
-  $('#stage-delete-text').text(n
-    ? `Delete ${st.name || 'this stage'} and its ${n} group${n > 1 ? 's' : ''}?`
-    : `Delete ${st.name || 'this stage'}?`);
+  const name = tName(st.name) || t('dash.stage');
+  $('#stage-delete-text').text(n ? t('stage.delete_with_groups', { name: name, count: n })
+                                 : t('stage.delete', { name: name }));
   $('#stage-delete-confirm').removeClass('d-none');
 }
 
@@ -1521,11 +1758,11 @@ function saveStage() {
   };
   $('#stage-name, #stage-message').removeClass('is-invalid');
 
-  if (!name) return fail('Enter a name for the stage.', $('#stage-name'));
+  if (!name) return fail(t('stage.err_name'), $('#stage-name'));
   if (!days && !hours && !stageModalIsLast())
-    return fail('Only the last stage can be open-ended: give it a length.');
+    return fail(t('stage.err_open_last'));
   if (endPause && !message)
-    return fail('Enter the message shown while the task waits.', $('#stage-message'));
+    return fail(t('stage.err_message'), $('#stage-message'));
 
   const values = { name, days, hours, endPause: !!endPause, message: endPause ? message : '' };
   if (stageModalNode) {
@@ -1542,7 +1779,7 @@ function saveStage() {
 
 function leafDutyText(ev) {
   const duty = parseInt(ev.duty) || 0;
-  return duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
+  return duty === 0 ? t('sch.duty_off') : duty === 100 ? t('sch.duty_on') : `${duty}%`;
 }
 
 // Short duration: 10s, 5m, 1h, 1h30m, 1m30s
@@ -1568,21 +1805,31 @@ function leafTimeText(ev) {
 // Stored in the event's "time" as HH:MM: the firmware adds it to the start
 // (CustomEvent::computeActivation). "--:--" or empty means no offset.
 function customOffsetSec(ev) {
-  const t = ev.time;
-  if (!t || t === '--:--') return 0;
-  return timeToSeconds(t);
+  const tm = ev.time;
+  if (!tm || tm === '--:--') return 0;
+  return timeToSeconds(tm);
+}
+
+// Label and level text of a leaf (also redrawn on a language change)
+function leafTexts(ev) {
+  const isPause = ev.repeat === 'freeze';
+  const isMsg = isMessageEvent(ev);
+  const isSnd = isSoundEvent(ev);
+  const cfg = outputsConfig.find(c => c.id == ev.channelId);
+  const on = parseInt(ev.duty) > 0;
+  const label = isPause ? `⏸ ${tName(ev.message) || t('sch.leaf_pause')}`
+              : isMsg ? (on ? `✉ ${tName(ev.message) || t('sch.leaf_message')}` : `✉ ${t('sch.leaf_message')}`)
+              : isSnd ? (on ? `♪ ${ev.sound || t('sch.leaf_sound')}` : `♪ ${t('sch.leaf_sound')}`)
+              : (cfg ? outLabel(cfg) : `Ch${ev.channelId}`);
+  const duty = isPause ? t('sch.duty_wait') : isMsg ? t(on ? 'sch.duty_show' : 'sch.duty_hide') : leafDutyText(ev);
+  return { label: label, duty: duty };
 }
 
 function createLeaf(ev, groupId) {
   const isPause = ev.repeat === 'freeze';
   const isMsg = isMessageEvent(ev);
   const isSnd = isSoundEvent(ev);
-  const cfg = outputsConfig.find(c => c.id == ev.channelId);
-  const label = isPause ? `⏸ ${ev.message || 'Pause'}`
-              : isMsg ? (parseInt(ev.duty) > 0 ? `✉ ${ev.message || 'Message'}` : '✉ Message')
-              : isSnd ? (parseInt(ev.duty) > 0 ? `♪ ${ev.sound || 'Sound'}` : '♪ Sound')
-              : (cfg ? cfg.label : `Ch${ev.channelId}`);
-  const dutyText = isPause ? 'WAIT' : isMsg ? (parseInt(ev.duty) > 0 ? 'SHOW' : 'HIDE') : leafDutyText(ev);
+  const { label, duty: dutyText } = leafTexts(ev);
   const noEdit = isPause || isMsg || isSnd;     // edited in the group dialog
   const enabled = ev.enabled !== false;
 
@@ -1593,8 +1840,8 @@ function createLeaf(ev, groupId) {
     <span class="tree-leaf-label">${escapeHtml(label)}</span>
     <span class="tree-leaf-duty">${dutyText}</span>
     <div class="tree-actions">
-      <button class="tree-edit-btn${noEdit ? ' invisible' : ''}" title="Edit">✏</button>
-      <button class="tree-remove-btn" title="Remove">×</button>
+      <button class="tree-edit-btn${noEdit ? ' invisible' : ''}" title="${escapeHtml(t('common.edit'))}" data-i18n-title="common.edit">✏</button>
+      <button class="tree-remove-btn" title="${escapeHtml(t('common.remove'))}" data-i18n-title="common.remove">×</button>
     </div>
   </div>
 `);
@@ -1707,14 +1954,14 @@ function buildNodeSummary(events) {
     })
     .map(ev => {
       const cfg = outputsConfig.find(c => c.id == ev.channelId);
-      return cfg ? cfg.label : `Ch${ev.channelId}`;
+      return cfg ? outLabel(cfg) : `Ch${ev.channelId}`;
     }).join(', ');
 
   // The user's name for the group if there is one, otherwise the channels;
   // a group that pauses the task is marked
   const pause = groupPause(events);
   const nodeLabel = (pause ? '⏸ ' : '') +
-    (groupNameOf(events) || channelList || (pause ? (pause.message || 'Pause') : ''));
+    (tName(groupNameOf(events)) || channelList || (pause ? (tName(pause.message) || t('sch.leaf_pause')) : ''));
 
   const first = events.find(e => e.repeat !== 'freeze') || events[0];
   const repeat = groupRepeat(events);
@@ -1735,10 +1982,10 @@ function buildNodeSummary(events) {
   const nodeDays = days.join(' : ');
 
   // Everything else goes into the tooltip; the leaves show the details
-  const when = (repeat === 'custom') ? `${leafTimeText(first)} cycle` : nodeTime;
+  const when = (repeat === 'custom') ? t('sch.cycle', { time: leafTimeText(first) }) : nodeTime;
   const pauseEv = groupPause(events);
   const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}` +
-    (pauseEv ? ` · pause: ${pauseEv.message || ''}` : '');
+    (pauseEv ? ' · ' + t('sch.pause_info', { message: tName(pauseEv.message) || '' }) : '');
   return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList };
 }
 
@@ -1802,9 +2049,9 @@ function convertFromMs(ms) {
 }
 
 function updateScheduleHeader() {
-  const task = taskList.find(t => t.index === taskIndex);
-  const name = task ? task.name : "--";
-  $("#schedule-task-name").text(taskIndex === 0 ? name + " (template)" : name);
+  const task = taskList.find(x => x.index === taskIndex);
+  const name = task ? tName(task.name) : "--";
+  $("#schedule-task-name").text(taskIndex === 0 ? name + " " + t("sch.template_mark") : name);
   // The template cannot be deleted
   $("#delete-btn").prop("disabled", !task || taskIndex === 0);
 }
@@ -1839,7 +2086,7 @@ function buildScheduleChannelDropdown() {
   }
 
   outputsConfig.forEach(opt => {
-    sel.append(`<option value="${opt.id}">${opt.id}: ${opt.label}</option>`);
+    sel.append($('<option>').val(opt.id).text(`${opt.id}: ${outLabel(opt)}`));
   });
 }
 
@@ -1877,7 +2124,7 @@ function updateFieldsForOutputMode(mode) {
       ensureCollapseHidden('#edit-duty-numeric-group');
       // hide toggle, show numeric	
       ensureCollapseShown('#edit-duty-toggle-group');
-      $('#edit-duty-toggle-label').text($('#edit-duty-toggle').is(':checked') ? 'On' : 'Off');
+      $('#edit-duty-toggle-label').text(t($('#edit-duty-toggle').is(':checked') ? 'common.on' : 'common.off'));
       break;
 
     case "softstart":
@@ -1925,7 +2172,7 @@ function applyDefaultParamsForMode(mode, channelId) {
   if (dutyEmpty) {
     $('#edit-duty').val(0);
     $('#edit-duty-toggle').prop('checked', false);
-    $('#edit-duty-toggle-label').text('Off');
+    $('#edit-duty-toggle-label').text(t('common.off'));
 
   }
 
@@ -1974,7 +2221,7 @@ function bindScheduleUI() {
 
   // Duty toggle label sync (if toggle exists)
   $('#edit-duty-toggle').on('change', function () {
-    $('#edit-duty-toggle-label').text(this.checked ? 'On' : 'Off');
+    $('#edit-duty-toggle-label').text(t(this.checked ? 'common.on' : 'common.off'));
   });
 
   // Buttons
@@ -2019,9 +2266,8 @@ function showPresetSchedule(data) {
   taskStages = Array.isArray(data.stages) ? data.stages : [];
   renderSchedule(taskContent);
   if (!Array.isArray(data.schedule) && Array.isArray(data.phases)) {
-    $('#schedule-tree').html(
-      '<p class="text-muted m-2">This is a plant preset made of growth phases. ' +
-      'It can be started from the Dashboard but not edited here.</p>');
+    $('#schedule-tree').html('<p class="text-muted m-2" data-i18n="sch.plant_preset"></p>');
+    $('#schedule-tree p').text(t('sch.plant_preset'));
   }
 }
 
@@ -2120,7 +2366,7 @@ function openBatchModal($row, newGroupId, stageId) {
     buildBatchChannelList(existingEvents, newRepeat);
     Object.keys(levels).forEach(ch => {
       const v = levels[ch];
-      if (typeof v === 'boolean') $(`#batch-toggle-${ch}`).prop('checked', v).next('label').text(v ? 'On' : 'Off');
+      if (typeof v === 'boolean') $(`#batch-toggle-${ch}`).prop('checked', v).next('label').text(t(v ? 'common.on' : 'common.off'));
       else $(`.batch-duty-input[data-channel="${ch}"]`).val(v);
     });
   });
@@ -2136,18 +2382,18 @@ function updateBatchTimeFields(repeat) {
   // Durations need seconds; clock times do not
   $('#batch-time-on, #batch-time-off').attr('step', repeat === 'custom' ? 1 : 60);
   if (repeat === 'daily') {
-    $('#batch-time-on-label').text('Time On');
+    $('#batch-time-on-label').text(t('batch.time_on'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').show();
-    $('#batch-time-off-label').text('Time Off');
+    $('#batch-time-off-label').text(t('batch.time_off'));
   } else if (repeat === 'custom') {
-    $('#batch-time-on-label').text('On Duration');
+    $('#batch-time-on-label').text(t('batch.on_duration'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').show();
-    $('#batch-time-off-label').text('Off Duration');
+    $('#batch-time-off-label').text(t('batch.off_duration'));
   } else {
     // once
-    $('#batch-time-on-label').text('Time');
+    $('#batch-time-on-label').text(t('common.time'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').hide();
   }
@@ -2169,17 +2415,15 @@ function buildBatchChannelList(existingEvents, repeat) {
   // Two areas of channel tiles, then the settings of the chosen channels
   $list.append(`
     <div class="ch-zone ch-zone-in" data-zone="in">
-      <div class="ch-zone-title">In this group</div>
+      <div class="ch-zone-title">${escapeHtml(t('batch.in_group'))}</div>
       <div class="ch-tiles"></div>
-      <div class="ch-zone-empty">Drag channels here or tap them</div>
+      <div class="ch-zone-empty">${escapeHtml(t('batch.drag_hint'))}</div>
     </div>
     <div class="ch-zone ch-zone-out" data-zone="out">
-      <div class="ch-zone-title">Available</div>
+      <div class="ch-zone-title">${escapeHtml(t('batch.available'))}</div>
       <div class="ch-tiles"></div>
     </div>
-    <div id="batch-channel-error" class="text-danger small mb-2" style="display:none;">
-      Add at least one channel to the group.
-    </div>
+    <div id="batch-channel-error" class="text-danger small mb-2" style="display:none;">${escapeHtml(t('batch.err_no_channel'))}</div>
     <div class="ch-settings"></div>`);
 
   const $settings = $list.find('.ch-settings');
@@ -2202,10 +2446,10 @@ function buildBatchChannelList(existingEvents, repeat) {
       // let its stage end with a pause: stage dialog.)
       $settings.append(`
         <div class="batch-channel-row batch-msg-row" data-channel="${cfg.id}">
-          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
           <div class="batch-msg-fields">
             <input type="text" class="form-control" id="batch-msg-text" maxlength="60"
-                   placeholder="Text, e.g. Remove the lid" autocomplete="off"
+                   placeholder="${escapeHtml(t('batch.message_ph'))}" autocomplete="off"
                    value="${escapeHtml(batchMsgText)}">
           </div>
         </div>`);
@@ -2217,10 +2461,10 @@ function buildBatchChannelList(existingEvents, repeat) {
       // day, custom: every cycle)
       $settings.append(`
         <div class="batch-channel-row batch-msg-row batch-sound-row" data-channel="${cfg.id}">
-          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
           <div class="batch-msg-fields d-flex align-items-center">
             <select class="form-control mr-2" id="batch-sound-file"></select>
-            <input type="number" class="form-control batch-duty-input" title="Volume, %"
+            <input type="number" class="form-control batch-duty-input" title="${escapeHtml(t('batch.volume_tip'))}"
                    data-channel="${cfg.id}" value="${duty || 50}" min="1" max="100" style="width:80px;">
             <span class="ml-1">%</span>
           </div>
@@ -2237,7 +2481,7 @@ function buildBatchChannelList(existingEvents, repeat) {
           <input type="checkbox" class="custom-control-input batch-duty-toggle"
                  id="batch-toggle-${cfg.id}" data-channel="${cfg.id}" ${checked}>
           <label class="custom-control-label" for="batch-toggle-${cfg.id}">
-            ${duty >= 50 ? 'On' : 'Off'}
+            ${escapeHtml(t(duty >= 50 ? 'common.on' : 'common.off'))}
           </label>
         </div>`;
     } else {
@@ -2249,7 +2493,7 @@ function buildBatchChannelList(existingEvents, repeat) {
 
     $settings.append(`
       <div class="batch-channel-row" data-channel="${cfg.id}">
-        <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+        <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
         <div class="batch-channel-duty">${dutyInput}</div>
       </div>
     `);
@@ -2263,7 +2507,7 @@ function buildBatchChannelList(existingEvents, repeat) {
 
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
-    $(this).next('label').text(this.checked ? 'On' : 'Off');
+    $(this).next('label').text(t(this.checked ? 'common.on' : 'common.off'));
   });
 
   renderChannelTiles();
@@ -2284,7 +2528,7 @@ function renderChannelTiles() {
         <div class="pic" style="${cfg.style || ''}">
           <img src="${cfg.icon || '/sun.svg'}" style="${invert}" width="24" height="24" alt="">
         </div>
-        <span class="ch-tile-label">${escapeHtml(cfg.label)}</span>
+        <span class="ch-tile-label">${escapeHtml(outLabel(cfg))}</span>
       </div>`);
     (batchMembers.has(Number(cfg.id)) ? $in : $out).append($tile);
     $list.find(`.batch-channel-row[data-channel="${cfg.id}"]`)
@@ -2569,7 +2813,7 @@ function openLeafModal($leaf, groupId) {
   $('#edit-duty').val(duty);
   if ($('#edit-duty-toggle').length) {
     $('#edit-duty-toggle').prop('checked', duty >= 50);
-    $('#edit-duty-toggle-label').text(duty >= 50 ? 'On' : 'Off');
+    $('#edit-duty-toggle-label').text(t(duty >= 50 ? 'common.on' : 'common.off'));
   }
 
   // Rise/Fall — preserve existing values silently
@@ -2597,8 +2841,8 @@ function openLeafModal($leaf, groupId) {
   $('#edit-enabled').closest('.form-group').hide();
 
   // Show channel name in modal title instead
-  const label = cfg ? cfg.label : `Ch${ev.channelId}`;
-  $('#editModal .modal-title').text(`Edit: ${label}`);
+  const label = cfg ? outLabel(cfg) : `Ch${ev.channelId}`;
+  $('#editModal .modal-title').text(t('item.title_named', { name: label }));
 
   $('#editModal')
     .off('shown.bs.modal.scheduleInit')
@@ -2665,8 +2909,7 @@ function applyScheduleToServer() {
   const openIdx = stages.findIndex(stageIsOpen);
   if (openIdx >= 0 && openIdx < stages.length - 1) {
     $('#schedule-error').removeClass('d-none').text(
-      `${stages[openIdx].name} is open-ended, so it has to be the last stage. ` +
-      'Give it a length or move it to the end.');
+      t('sch.err_open_not_last', { name: tName(stages[openIdx].name) }));
     return;
   }
   $('#schedule-error').addClass('d-none');
@@ -2696,8 +2939,8 @@ function showSaveAsDialog() {
   $('#save-as-error').hide().text('');
   $('#save-as-hint').text(
     isDefault
-      ? 'The template stays as it is. Enter a name for the new task.'
-      : 'Save keeps this task (a new name renames it). Save as new creates a copy.'
+      ? t('save.hint_template')
+      : t('save.hint_task')
   );
   $('#save-as-confirm').toggle(!isDefault);
   $('#save-as-new').toggleClass('btn-primary', isDefault).toggleClass('btn-outline-primary', !isDefault);
@@ -2708,12 +2951,12 @@ function showSaveAsDialog() {
     const name = $('#new-task-name').val().trim();
     let error = '';
     if (!name) {
-      error = 'Please enter a task name.';
+      error = t('save.err_name');
     } else if (name.toLowerCase() === 'default') {
-      error = '"Default" is the name of the template. Please choose another name.';
-    } else if (taskList.some(t => t.index !== keepId && t.index !== 0 &&
-                                  String(t.name).toLowerCase() === name.toLowerCase())) {
-      error = `A task named "${name}" already exists. Please choose another name.`;
+      error = t('save.err_default');
+    } else if (taskList.some(x => x.index !== keepId && x.index !== 0 &&
+                                  String(x.name).toLowerCase() === name.toLowerCase())) {
+      error = t('save.err_exists', { name: name });
     }
     if (error) {
       $('#save-as-error').text(error).show();
@@ -2766,7 +3009,7 @@ function sendScheduleToServer(index, name) {
 
       // Same task saved again, possibly under a new name: rename it everywhere
       if (resp.id && resp.id === taskIndex) {
-        const task = taskList.find(t => t.index === taskIndex);
+        const task = taskList.find(x => x.index === taskIndex);
         if (task) task.name = currentTaskName;
         $(`#taskSelect option[value="${taskIndex}"]`).text(currentTaskName);
         updateScheduleHeader();
@@ -2798,7 +3041,7 @@ function sendScheduleToServer(index, name) {
     },
     error: xhr => {
       console.warn("/preset/save failed:", xhr.status, xhr.responseText);
-      alert("Saving failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+      alert(t("save.failed", { error: (xhr.responseJSON && xhr.responseJSON.error) || xhr.status }));
     }
   });
 }
@@ -2809,7 +3052,7 @@ function sendScheduleToServer(index, name) {
 function showDeleteDialog() {
   if (taskIndex === 0) return;   // the template cannot be deleted
   const running = (taskStatus === 'running' || taskStatus === 'paused');
-  $('#delete-task-name').text(currentTaskName || '');
+  $('#delete-text').text(t('del.will_be_deleted', { name: tName(currentTaskName || '') }));
   $('#delete-running-hint').toggle(running);
   $('#deleteModal').modal({ backdrop: 'static', keyboard: false });
   $('#deleteModal').modal('show');
@@ -2825,9 +3068,9 @@ function deleteCurrentTask() {
     data: JSON.stringify({ id: id }),
     success: () => {
       // Forget the preset and show the next one (the template if none left)
-      taskList = taskList.filter(t => t.index !== id);
+      taskList = taskList.filter(x => x.index !== id);
       $(`#taskSelect option[value="${id}"]`).remove();
-      if (!taskList.some(t => t.index === 0)) {
+      if (!taskList.some(x => x.index === 0)) {
         taskList.unshift({ index: 0, name: 'Default', builtIn: true });
         $('#taskSelect').prepend('<option value="0">Default</option>');
       }
@@ -2845,7 +3088,7 @@ function deleteCurrentTask() {
     },
     error: xhr => {
       console.warn("/preset/delete failed:", xhr.status, xhr.responseText);
-      alert("Deleting failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+      alert(t("del.failed", { error: (xhr.responseJSON && xhr.responseJSON.error) || xhr.status }));
     }
   });
 }
@@ -2889,6 +3132,24 @@ function buildRepeatString() {
   return val || 'daily';
 }
 
+// Language changed: redraw the tree's texts in place, so edits that are not
+// saved yet stay as they are
+onLanguageChange(() => {
+  if (!initialized.schedule) return;
+  updateScheduleHeader();
+  refreshStageHeaders();
+  $('#schedule-tree .tree-leaf').each(function () {
+    const ev = $(this).data('event');
+    if (!ev) return;
+    const tx = leafTexts(ev);
+    $(this).find('.tree-leaf-label').text(tx.label);
+    $(this).find('.tree-leaf-duty').text(tx.duty);
+  });
+  $('#schedule-tree .tree-node').each(function () { refreshNodeSummary($(this)); });
+  buildScheduleChannelDropdown();
+  $('#schedule-error').addClass('d-none');      // shown again on the next Apply
+});
+
   function initPlayground() {
   console.log("Playground init");
   buildPlayground();
@@ -2922,18 +3183,20 @@ function buildPlayground() {
           <div class="pic" style="${o.style}">
           <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
           </div>
-          <strong>${o.label}</strong>
+          <strong class="out-label" data-out-id="${o.id}">${_escT0(outLabel(o))}</strong>
           </div>
 
 <div class="play-controls d-flex">
   <!-- same look as the Dashboard start/stop buttons -->
-  <button class="btn btn-success btn-small play-btn play-on" data-id="${o.id}" data-action="on">
+  <button class="btn btn-success btn-small play-btn play-on" data-id="${o.id}" data-action="on"
+          title="${_escT0(t('dash.btn_start'))}" data-i18n-title="dash.btn_start">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
       <path d="M4 3.3v9.4L12 8 4 3.3z" />
     </svg>
   </button>
 
-  <button class="btn btn-danger btn-small play-btn play-off" data-id="${o.id}" data-action="off">
+  <button class="btn btn-danger btn-small play-btn play-off" data-id="${o.id}" data-action="off"
+          title="${_escT0(t('dash.btn_stop'))}" data-i18n-title="dash.btn_stop">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
       <rect x="4" y="4" width="8" height="8" />
     </svg>
@@ -2962,25 +3225,25 @@ function buildPlayground() {
               <div class="card-body">
 
                 <div class="form-group">
-                  <label>Rise Time (ms)</label>
+                  <label data-i18n="pg.rise_ms">${_escT0(t('pg.rise_ms'))}</label>
                   <input type="number" class="form-control rise-input"
                          data-id="${o.id}" value="${o.riseDefault || 0}">
                 </div>
 
                 <div class="form-group">
-                  <label>Fall Time (ms)</label>
+                  <label data-i18n="pg.fall_ms">${_escT0(t('pg.fall_ms'))}</label>
                   <input type="number" class="form-control fall-input"
                          data-id="${o.id}" value="${o.fallDefault || 0}">
                 </div>
 
                 <div class="form-group">
-                  <label>On Time (sec)</label>
+                  <label data-i18n="pg.on_sec">${_escT0(t('pg.on_sec'))}</label>
                   <input type="number" class="form-control ontime-input"
                          data-id="${o.id}" value="0">
                 </div>
 
                 <div class="form-group">
-                  <label>Off Time (sec)</label>
+                  <label data-i18n="pg.off_sec">${_escT0(t('pg.off_sec'))}</label>
                   <input type="number" class="form-control offtime-input"
                          data-id="${o.id}" value="0">
                 </div>
@@ -3079,8 +3342,8 @@ $(".play-slider").not(".play-sound-volume").on("input", function () {
 
   // Cancel ramping highlight
   $(`.play-btn[data-id=${id}]`).each(function () {
-    const t = $(this).data("timer");
-    if (t) clearTimeout(t);
+    const timer = $(this).data("timer");
+    if (timer) clearTimeout(timer);
     $(this).removeClass("play-active");
   });
 
@@ -3196,15 +3459,15 @@ function loadSoundFiles(done) {
 // Fill a <select> with the sound files; a file named by an event but no
 // longer on the controller stays selectable, marked "missing"
 function fillSoundSelect($sel, selected) {
-  $sel.html('<option value="">Loading...</option>');
+  $sel.empty().append($('<option value="">').text(t("common.loading")));
   loadSoundFiles(list => {
     const names = list.slice();
     if (selected && !names.includes(selected)) names.unshift(selected);
     $sel.empty();
-    if (!names.length) $sel.append('<option value="">No .wav files</option>');
-    else if (!selected) $sel.append('<option value="">Choose a sound</option>');
+    if (!names.length) $sel.append($('<option value="">').text(t("pg.no_wav")));
+    else if (!selected) $sel.append($('<option value="">').text(t("pg.choose_sound")));
     names.forEach(n => {
-      const missing = !list.includes(n) ? " (missing)" : "";
+      const missing = !list.includes(n) ? " " + t("pg.missing") : "";
       $sel.append($("<option>").val(n).text(n + missing));
     });
     $sel.val(selected || "");
@@ -3220,10 +3483,10 @@ function buildSoundCard(o) {
           <div class="pic" style="${o.style}">
             <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
           </div>
-          <strong>${o.label}</strong>
+          <strong class="out-label" data-out-id="${o.id}">${_escT0(outLabel(o))}</strong>
         </div>
         <div class="play-controls d-flex">
-          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="Play">
+          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="${_escT0(t('pg.play'))}" data-i18n-title="pg.play">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <path d="M4 3.3v9.4L12 8 4 3.3z" />
             </svg>
@@ -3246,7 +3509,7 @@ function buildSoundCard(o) {
 
 function playSoundNow(id, file, volume) {
   const $err = $(`#play-sound-err-${id}`).addClass("d-none");
-  if (!file) { $err.text("Choose a sound first.").removeClass("d-none"); return; }
+  if (!file) { $err.text(t("pg.err_choose")).removeClass("d-none"); return; }
   const $btn = $(`.play-sound-btn[data-id=${id}]`).addClass("play-active");
   setTimeout(() => $btn.removeClass("play-active"), 600);
   if (OFFLINE_MODE) return;
@@ -3255,9 +3518,27 @@ function playSoundNow(id, file, volume) {
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({ file, volume }),
-    error: () => $err.text("The controller could not play " + file + ".").removeClass("d-none")
+    error: () => $err.text(t("pg.err_play", { file: file })).removeClass("d-none")
   });
 }
+
+// Text for HTML built in template strings
+function _escT0(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Language changed: output names, sound lists and error lines of the cards
+onLanguageChange(() => {
+  if (!initialized.playground) return;
+  $("#playground-container .out-label").each(function () {
+    const cfg = outputsConfig.find(c => String(c.id) === String($(this).data("out-id")));
+    $(this).text(outLabel(cfg));
+  });
+  $("#playground-container select[id^='play-sound-file-']").each(function () {
+    fillSoundSelect($(this), $(this).val());
+  });
+  $("#playground-container [id^='play-sound-err-']").addClass("d-none");
+});
 /* ============================================================
    SETTINGS PAGE
    Endpoints used:
@@ -3300,9 +3581,7 @@ function _ipModeManual() { return $("#ip-mode-manual").is(":checked"); }
 function _applyIpMode() {
   const manual = _ipModeManual();
   $(".ip-field").prop("disabled", !manual);
-  $("#ip-mode-hint").text(manual
-    ? "Type the address yourself. It must be free and in your home network."
-    : "The farm takes a free address .200–.249 in your network and keeps it.");
+  $("#ip-mode-hint").text(t(manual ? "set.ip_manual_hint" : "set.ip_auto_hint"));
   if (manual && homeInfo) {
     // start from the saved manual values, else from what is in use now
     const m = homeInfo.manual || {};
@@ -3325,21 +3604,28 @@ function _showHome(h) {
   }
   if (!h || h.state === "off") { box.hide(); _followHome(false); return; }
 
-  const net = _esc(h.ssid || "home network");
+  // Texts are escaped first; the network name goes in as bold HTML
+  const net = `<strong>${_esc(h.ssid || t("set.home_network"))}</strong>`;
+  const th = (key, p) => {
+    // t() with HTML values: escape the text, then put the values in
+    let s = _esc(t(key));
+    Object.keys(p || {}).forEach(k => { s = s.split("{" + k + "}").join(p[k]); });
+    return s;
+  };
   let html = "";
   if (h.state === "connected" && h.ip) {
     const url = "http://" + h.ip + "/";
-    html = `Connected to <strong>${net}</strong>.<br>Farm at home: ` +
+    html = th("set.st_connected", { ssid: net }) + "<br>" + th("set.st_farm_at_home") + " " +
            `<a href="${url}" target="_blank" rel="noopener" class="font-weight-bold" id="home-link">${_esc(url)}</a>` +
-           `<span class="text-muted d-block mt-1">Open it from a phone or PC on ${net}` +
-           `${h.hostname ? " · name in the router: " + _esc(h.hostname) : ""}</span>`;
-    if (h.kind === "dhcp") html += `<span class="d-block mt-1">The router's address is used: it may change.</span>`;
+           `<span class="text-muted d-block mt-1">` + th("set.st_open_from", { ssid: _esc(h.ssid || t("set.home_network")) }) +
+           (h.hostname ? " · " + th("set.st_router_name", { name: _esc(h.hostname) }) : "") + `</span>`;
+    if (h.kind === "dhcp") html += `<span class="d-block mt-1">` + th("set.st_router_address") + `</span>`;
   } else if (h.state === "retry") {
     const min = h.retryIn ? Math.max(1, Math.round(h.retryIn / 60)) : 0;
-    html = `Not connected to <strong>${net}</strong>.` + (min ? ` Next try in ${min} min.` : "");
+    html = th("set.st_not_connected", { ssid: net }) + (min ? " " + th("set.st_next_try", { min: min }) : "");
   } else {
     html = `<span class="spinner-border spinner-border-sm mr-1" role="status"></span>` +
-           `Connecting to <strong>${net}</strong>…`;
+           th("set.st_connecting", { ssid: net });
   }
   if (h.note) html += `<span class="d-block mt-1 text-warning-dark">${_esc(h.note)}</span>`;
   box.html(html).show();
@@ -3359,7 +3645,7 @@ function _showHome(h) {
   }
   const ip = h.ip || "";
   $("#ip-reserve-hint").text(ip && h.hostname
-    ? `To be sure the address stays free, reserve ${ip} for ${h.hostname} in your router.` : "")
+    ? t("set.st_reserve", { ip: ip, name: h.hostname }) : "")
     .toggle(!!(ip && h.hostname));
 
   _followHome(["connecting", "checking", "switching"].includes(h.state));
@@ -3401,7 +3687,7 @@ function loadSettingsData() {
       ipTouched = false;
       _showHome(d.home);
     })
-    .fail(() => _settingsStatus("Could not load settings.", "danger"));
+    .fail(() => _settingsStatus("set.load_failed", "danger"));
 }
 
 /* wifi scan */
@@ -3418,7 +3704,7 @@ function runWifiScan() {
 
       const nets = (d.networks || []).sort((a, b) => b.rssi - a.rssi);
       if (!nets.length) {
-        list.innerHTML = '<span class="list-group-item text-muted">No networks found</span>';
+        list.innerHTML = '<span class="list-group-item text-muted">' + _esc(t("set.no_networks")) + '</span>';
       } else {
         nets.forEach(n => {
           const item = document.createElement("a");
@@ -3440,16 +3726,16 @@ function runWifiScan() {
       }
       document.getElementById("wifi-scan-results").style.display = "";
     })
-    .fail(() => _settingsStatus("Scan failed.", "danger"))
+    .fail(() => _settingsStatus("set.scan_failed", "danger"))
     .always(() => {
       btn.disabled = false;
-      btn.textContent = "Scan";
+      btn.textContent = t("set.scan");
     });
 }
 
 /* disconnect STA */
 function staDisconnect() {
-  if (!confirm("Disconnect from home network?")) return;
+  if (!confirm(t("set.disconnect_q"))) return;
 
   $.ajax({ url: "/wifi/disconnect", type: "POST",
            contentType: "application/json", data: "{}" })
@@ -3457,9 +3743,9 @@ function staDisconnect() {
       document.getElementById("sta-ssid").value = "";
       document.getElementById("sta-pass").value = "";
       _showStaSaved(false, false);
-      _settingsStatus("Disconnected. Reconnect to the AP to continue.", "info");
+      _settingsStatus("set.disconnected", "info");
     })
-    .fail(() => _settingsStatus("Disconnect failed.", "danger"));
+    .fail(() => _settingsStatus("set.disconnect_failed", "danger"));
 }
 
 /* save & restart */
@@ -3471,10 +3757,10 @@ function saveSettings() {
 
   /* basic validation */
   if (apSsid.length < 1) {
-    return _settingsStatus("AP network name cannot be empty.", "warning");
+    return _settingsStatus("set.err_ap_name", "warning");
   }
   if (apPass.length > 0 && apPass.length < 8) {
-    return _settingsStatus("AP password must be at least 8 characters.", "warning");
+    return _settingsStatus("set.err_ap_pass", "warning");
   }
 
   const payload = {};
@@ -3489,14 +3775,14 @@ function saveSettings() {
       const v = id => $(id).val().trim();
       const ipRe = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
       const ok = s => ipRe.test(s) && s.split(".").every(n => +n <= 255);
-      const fields = [["#ip-addr", "Address"], ["#ip-mask", "Mask"], ["#ip-gw", "Gateway"]];
-      for (const [id, name] of fields) {
+      const fields = [["#ip-addr", "set.address"], ["#ip-mask", "set.mask"], ["#ip-gw", "set.gateway"]];
+      for (const [id, key] of fields) {
         if (!ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
-          return _settingsStatus(`${name}: four numbers, like ${$(id).attr("placeholder")}.`, "warning"); }
+          return _settingsStatus("set.err_ip", "warning", { field: t(key), example: $(id).attr("placeholder") }); }
       }
-      for (const [id, name] of [["#ip-dns1", "DNS 1"], ["#ip-dns2", "DNS 2"]]) {
+      for (const [id, key] of [["#ip-dns1", "set.dns1"], ["#ip-dns2", "set.dns2"]]) {
         if (v(id) && !ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
-          return _settingsStatus(`${name}: four numbers, or leave it empty.`, "warning"); }
+          return _settingsStatus("set.err_ip_optional", "warning", { field: t(key) }); }
       }
       payload.ip = { mode: "manual", ip: v("#ip-addr"), mask: v("#ip-mask"), gw: v("#ip-gw"),
                      dns1: v("#ip-dns1"), dns2: v("#ip-dns2") };
@@ -3507,14 +3793,14 @@ function saveSettings() {
 
   const btn = document.getElementById("settings-save-btn");
   btn.disabled = true;
-  btn.textContent = "Saving…";
+  btn.textContent = t("set.saving");
   _settingsStatus("", "");
 
   if (OFFLINE_MODE) {
     setTimeout(() => {
       btn.disabled = false;
-      btn.textContent = "Save & Restart";
-      _settingsStatus("Offline mode — settings not sent.", "warning");
+      btn.textContent = t("set.save_restart");
+      _settingsStatus("set.offline_not_sent", "warning");
     }, 600);
     return;
   }
@@ -3527,23 +3813,20 @@ function saveSettings() {
   })
   .done(resp => {
     if (resp && resp.restart) {
-      _settingsStatus(
-        "Saved! Device is restarting. Reconnect to the AP with the new credentials. " +
-        "When the farm has joined your home network, its address there is shown on this page.",
-        "success"
-      );
-      btn.textContent = "Restarting…";
+      _settingsStatus("set.saved_restart", "success");
+      btn.textContent = t("set.restarting");
     } else {
-      _settingsStatus("Saved.", "success");
+      _settingsStatus("set.saved", "success");
       btn.disabled = false;
-      btn.textContent = "Save & Restart";
+      btn.textContent = t("set.save_restart");
     }
   })
   .fail(xhr => {
-    const msg = (xhr.responseJSON && xhr.responseJSON.error) || "Save failed.";
-    _settingsStatus(msg, "danger");
+    // The controller's own error text is shown as it comes
+    const err = xhr.responseJSON && xhr.responseJSON.error;
+    if (err) _settingsStatusText(err, "danger"); else _settingsStatus("set.save_failed", "danger");
     btn.disabled = false;
-    btn.textContent = "Save & Restart";
+    btn.textContent = t("set.save_restart");
   });
 }
 
@@ -3560,12 +3843,15 @@ function _togglePass(inputId, btnId) {
   }
 }
 
+let staBadge = { saved: false, connected: false };   // redrawn on language change
+
 function _showStaSaved(saved, connected) {
+  staBadge = { saved: saved, connected: connected };
   const badge = document.getElementById("sta-saved-badge");
   const disconnRow = document.getElementById("sta-disconnect-row");
   if (saved) {
     badge.style.removeProperty("display");
-    badge.textContent = connected ? "Connected" : "Saved";
+    badge.textContent = t(connected ? "set.badge_connected" : "set.badge_saved");
     badge.className = connected ? "badge badge-success" : "badge badge-secondary";
     disconnRow.style.display = "";
   } else {
@@ -3574,13 +3860,34 @@ function _showStaSaved(saved, connected) {
   }
 }
 
-function _settingsStatus(msg, type) {
+// Status line: a text key (+ placeholder values), redrawn on language
+// change; "" hides it
+let settingsStatus = null;
+function _settingsStatus(key, type, params) {
+  settingsStatus = key ? { key: key, type: type, params: params } : null;
+  _showSettingsStatus(key ? t(key, params) : "", type);
+}
+// A text that is not in local.json (an error from the controller)
+function _settingsStatusText(msg, type) {
+  settingsStatus = null;
+  _showSettingsStatus(msg, type);
+}
+function _showSettingsStatus(msg, type) {
   const el = document.getElementById("settings-status");
   if (!msg) { el.style.display = "none"; return; }
   el.className = "alert alert-" + type;
   el.textContent = msg;
   el.style.display = "";
 }
+
+// Language changed: redraw what this screen built in JS
+onLanguageChange(() => {
+  if (!initialized.settings) return;
+  _applyIpMode();
+  if (homeInfo) _showHome(homeInfo);
+  _showStaSaved(staBadge.saved, staBadge.connected);
+  if (settingsStatus) _showSettingsStatus(t(settingsStatus.key, settingsStatus.params), settingsStatus.type);
+});
 
 function _rssiBars(rssi) {
   if (rssi >= -55) return "▂▄▆█";
@@ -3644,13 +3951,11 @@ function showSessionLost() {
   currentPage = 'lost';              // stops the dashboard polling loop
   exitGuardLeaving = true;           // no "leave site?" prompts from now on
   $('.modal.show').modal('hide');
-  $('body').append(
-    '<div class="exit-done">' +
-    '<h5>Session ended</h5>' +
-    '<p>Your control session has ended after a period of inactivity. ' +
-    'Another user may be controlling the farm now.</p>' +
-    '<a class="btn btn-primary" href="/">Reconnect</a>' +
-    '</div>');
+  const $box = $('<div class="exit-done"><h5></h5><p></p><a class="btn btn-primary" href="/"></a></div>');
+  $box.find('h5').text(t('sess.ended'));
+  $box.find('p').text(t('sess.ended_text'));
+  $box.find('a').text(t('sess.reconnect'));
+  $('body').append($box);
 }
 
 // The controller says this page no longer owns the session. If it ended by
@@ -3757,8 +4062,8 @@ function armExitGuard() {
 const EXIT_GUARD_ARM_EVENTS = ['click', 'keyup', 'touchend', 'pointerup'];
 
 function armExitGuardOnInteraction() {
-  EXIT_GUARD_ARM_EVENTS.forEach(t =>
-    document.addEventListener(t, armExitGuard, { capture: true, passive: true }));
+  EXIT_GUARD_ARM_EVENTS.forEach(type =>
+    document.addEventListener(type, armExitGuard, { capture: true, passive: true }));
 }
 
 window.addEventListener('popstate', () => {
@@ -3810,12 +4115,11 @@ function finishLeaving() {
   // Skip all guard entries and the app's own entry in one step.
   history.go(-(guardDepth() + 1));
   setTimeout(() => {
-    $('body').append(
-      '<div class="exit-done">' +
-      '<h5>Session closed</h5>' +
-      '<p>You can close this window now.</p>' +
-      '<a class="btn btn-primary" href="/">Open control panel again</a>' +
-      '</div>');
+    const $box = $('<div class="exit-done"><h5></h5><p></p><a class="btn btn-primary" href="/"></a></div>');
+    $box.find('h5').text(t('exit.closed'));
+    $box.find('p').text(t('exit.closed_text'));
+    $box.find('a').text(t('exit.open_again'));
+    $('body').append($box);
   }, 400);
 }
 
