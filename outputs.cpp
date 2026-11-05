@@ -140,8 +140,8 @@ Output::Output(uint8_t pin,
     delta(0),
     ramping(false),
     rampMs(rampDefault),
-    riseMs(0),
-    fallMs(0),
+    riseMs(rampDefault),   // Playground Start/Stop ramp with the default
+    fallMs(rampDefault),   // until the page sends other times
     onSeconds(0),
     offSeconds(0),
     loopState(LOOP_IDLE),
@@ -335,16 +335,11 @@ void Output::update() {
 }
 
 
-static int outIndex = 0;
-
+// Called every 50 ms. Every output is updated on every call: the ramp step
+// (delta) is worked out per 50 ms, so updating one output per call in turn
+// made each ramp OUTPUT_COUNT times slower than set.
 void updateOutputs() {
-  static int outIndex = 0;
-
-  OUT[outIndex].update();
-
-  outIndex++;
-  if (outIndex >= OUTPUT_COUNT)
-    outIndex = 0;
+  for (int i = 0; i < OUTPUT_COUNT; i++) OUT[i].update();
 }
 
 void resetOutputs() {

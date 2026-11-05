@@ -61,7 +61,7 @@ void handlePlaygroundParams(AsyncWebServerRequest *req, uint8_t *data, size_t le
 }
 //handle output manipulations
 void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<192> doc;
 
   if (deserializeJson(doc, data, len)) {
     req->send(400, "application/json", "{\"error\":\"Bad JSON\"}");
@@ -88,6 +88,10 @@ void handlePlaygroundControl(AsyncWebServerRequest *req, uint8_t *data, size_t l
   uint8_t duty255 = (dutyPct * 255) / 100;
 
   Output &ch = OUT[id];
+
+  // Start/Stop send the rise and fall times shown on the card (ms)
+  if (doc.containsKey("rise")) ch.riseMs = doc["rise"].as<uint32_t>();
+  if (doc.containsKey("fall")) ch.fallMs = doc["fall"].as<uint32_t>();
 
   // Playground disables loop completely
   ch.disableLoop();
