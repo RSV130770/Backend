@@ -45,8 +45,8 @@ function armExitGuard() {
 const EXIT_GUARD_ARM_EVENTS = ['click', 'keyup', 'touchend', 'pointerup'];
 
 function armExitGuardOnInteraction() {
-  EXIT_GUARD_ARM_EVENTS.forEach(t =>
-    document.addEventListener(t, armExitGuard, { capture: true, passive: true }));
+  EXIT_GUARD_ARM_EVENTS.forEach(type =>
+    document.addEventListener(type, armExitGuard, { capture: true, passive: true }));
 }
 
 window.addEventListener('popstate', () => {
@@ -98,12 +98,11 @@ function finishLeaving() {
   // Skip all guard entries and the app's own entry in one step.
   history.go(-(guardDepth() + 1));
   setTimeout(() => {
-    $('body').append(
-      '<div class="exit-done">' +
-      '<h5>Session closed</h5>' +
-      '<p>You can close this window now.</p>' +
-      '<a class="btn btn-primary" href="/">Open control panel again</a>' +
-      '</div>');
+    const $box = $('<div class="exit-done"><h5></h5><p></p><a class="btn btn-primary" href="/"></a></div>');
+    $box.find('h5').text(t('exit.closed'));
+    $box.find('p').text(t('exit.closed_text'));
+    $box.find('a').text(t('exit.open_again'));
+    $('body').append($box);
   }, 400);
 }
 

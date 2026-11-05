@@ -127,6 +127,15 @@ let servicePauseByPlayground = false;
 let sliderActive = false;
 
 function disableSwipe() { swipeEnabled = false; }
+
+// iPhone: the screen keyboard stays up (or comes back on the next tap) while
+// a text field that is no longer on screen still has the focus: after a
+// swipe to another screen, or after a dialog with a field was closed.
+// Take the focus away from such a field when the screen or a dialog changes.
+function dropTextFocus() {
+  const el = document.activeElement;
+  if (el && el !== document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) el.blur();
+}
 function enableSwipe() { swipeEnabled = true; }
 
 /* ============================================================
@@ -139,6 +148,8 @@ function showPage(name) {
   if ($('.modal.show').length > 0) return;
   const index = pageOrder.indexOf(name);
   if (index === -1) return;
+
+  dropTextFocus();                    // the old screen's field must not keep the keyboard
 
   // capture previous BEFORE updating
   const previous = currentPage;
@@ -227,6 +238,9 @@ function updateDots(index) {
    DOM READY — ALL EVENT BINDINGS
    ============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
+
+  // Any dialog closing: its fields must not keep the keyboard (iPhone)
+  $(document).on('hide.bs.modal', '.modal', dropTextFocus);
 
   /* Modal swipe disable + lastMode reset on close */
   $('#batchModal').on('shown.bs.modal', disableSwipe);

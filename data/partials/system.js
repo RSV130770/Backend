@@ -144,7 +144,8 @@ function updateDateTime() {
 /* ============================================================
    APP STARTUP
    ============================================================ */
-detectOfflineMode().then(isOffline => {
+// Texts (i18n.js) and the controller check run side by side
+Promise.all([detectOfflineMode(), I18N_READY]).then(([isOffline]) => {
   if (isOffline) {
     console.warn("Backend unreachable → switching to OFFLINE_MODE");
     OFFLINE_MODE = true;

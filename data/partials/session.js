@@ -27,13 +27,11 @@ function showSessionLost() {
   currentPage = 'lost';              // stops the dashboard polling loop
   exitGuardLeaving = true;           // no "leave site?" prompts from now on
   $('.modal.show').modal('hide');
-  $('body').append(
-    '<div class="exit-done">' +
-    '<h5>Session ended</h5>' +
-    '<p>Your control session has ended after a period of inactivity. ' +
-    'Another user may be controlling the farm now.</p>' +
-    '<a class="btn btn-primary" href="/">Reconnect</a>' +
-    '</div>');
+  const $box = $('<div class="exit-done"><h5></h5><p></p><a class="btn btn-primary" href="/"></a></div>');
+  $box.find('h5').text(t('sess.ended'));
+  $box.find('p').text(t('sess.ended_text'));
+  $box.find('a').text(t('sess.reconnect'));
+  $('body').append($box);
 }
 
 // The controller says this page no longer owns the session. If it ended by

@@ -79,7 +79,7 @@ let presetListLoading = false;
 
 function loadPresetList(attempt) {
   presetListLoading = true;
-  $("#taskSelectLabel").text(attempt > 1 ? `Loading task list (try ${attempt})...` : "Loading task list...");
+  $("#taskSelectLabel").text(attempt > 1 ? t("dash.task_list_loading_try", { n: attempt }) : t("dash.task_list_loading"));
   $.ajax({ url: "/preset/list", dataType: "json", timeout: 8000 }).done(raw => {
     presetListLoading = false;
 
@@ -100,14 +100,14 @@ function loadPresetList(attempt) {
     // The controller's selected preset (running or not, kept in its RTC
     // memory); the template if that preset does not exist
     const selected = raw.current ? raw.current.presetId : 0;
-    taskIndex = tasks.some(t => t.index === selected) ? selected : 0;
+    taskIndex = tasks.some(x => x.index === selected) ? selected : 0;
 
       
     // Populate dropdown
     const select = $("#taskSelect");
     select.empty();
-    tasks.forEach(t => {
-      select.append($('<option>').val(t.index).text(t.name));   // name as plain text
+    tasks.forEach(x => {
+      select.append($('<option>').val(x.index).text(x.name));   // name as plain text
     });
     select.val(taskIndex);
 
@@ -129,8 +129,9 @@ function loadPresetList(attempt) {
     presetListLoading = false;
     // Show why, and let the user try again with a tap
     const why = xhr.status ? `error ${xhr.status}` : textStatus;
-    $("#taskSelectLabel")
-      .html(`Task list unavailable (${why}). <a href="#" id="taskListRetry">Retry</a>`);
+    $("#taskSelectLabel").empty()
+      .append(document.createTextNode(t("dash.task_list_unavailable", { reason: why }) + " "))
+      .append($('<a href="#" id="taskListRetry"></a>').text(t("common.retry")));
     $("#taskListRetry").one("click", e => { e.preventDefault(); loadPresetList(1); });
   });
 }
@@ -187,29 +188,29 @@ function updateTaskUI(status) {
   // Task tile: the name; until the list arrives the label shows
   // "Loading..." or the retry link put there by loadPresetList()
   if (taskList.length) {
-    const task = taskList.find(t => t.index === taskIndex);
-    $("#taskSelectLabel").text(task ? task.name : "Unknown");
+    const task = taskList.find(x => x.index === taskIndex);
+    $("#taskSelectLabel").text(task ? tName(task.name) : t("common.unknown"));
   }
-  const since = taskStartTime ? " since " + tileTime(taskStartTime) : "";
   const line = {
-    running:  "Running" + since,
-    paused:   "Paused",
-    frozen:   "Waiting",
-    finished: "Finished"
-  }[status] || "Stopped";
+    running:  taskStartTime ? t("dash.status_running_since", { time: tileTime(taskStartTime) })
+                            : t("dash.status_running"),
+    paused:   t("dash.status_paused"),
+    frozen:   t("dash.status_waiting"),
+    finished: t("dash.status_finished")
+  }[status] || t("dash.status_stopped");
   $("#taskStatusLabel").text(line);
   $("#taskTile").attr("data-status", status);
 
   // Stage-end banner
   $("#pause-banner").toggleClass("d-none", status !== "frozen");
-  $("#pause-message").text(pauseMessage || "");
+  $("#pause-message").text(tName(pauseMessage || ""));
   updateMessagesCard();
 
   // Buttons. Pause becomes Resume while paused.
   const active = status === "running" || status === "paused" || status === "frozen";
   $("#taskStart").prop("disabled", active);
   $("#taskPause").prop("disabled", status !== "running" && status !== "paused")
-    .attr("title", status === "paused" ? "Resume" : "Pause")
+    .attr("title", t(status === "paused" ? "dash.btn_resume" : "dash.btn_pause"))
     .find("path").attr("d", status === "paused" ? RESUME_ICON : PAUSE_ICON);
   $("#taskStop").prop("disabled", !active);
 
@@ -233,17 +234,24 @@ function buildDashboard() {
           <div class="pic" style="${o.style || ''}">
             <img src="${o.icon || '/sun.svg'}" style="${invertStyle}" width="28" height="28">
           </div>
-          <div><strong>${o.label}</strong></div>
+          <div><strong class="out-label"></strong></div>
         </div>
 
         <div class="text-right">
           <div class="value-big" id="out_${o.id}_value">--%</div>
-          <div class="countdown">Next: <span id="out_${o.id}_count">--:--</span></div>
+          <div class="countdown"><span data-i18n="dash.next_label">${_escT("dash.next_label")}</span> <span id="out_${o.id}_count">--:--</span></div>
         </div>
 
       </div>
     `);
+    // the name as plain text (it may come from the user)
+    $(container).find(`.channel-row[data-id="${o.id}"] .out-label`).text(outLabel(o));
   });
+}
+
+// t() for HTML built in a template string
+function _escT(key, params) {
+  return String(t(key, params)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 
@@ -337,8 +345,10 @@ function followTaskStatus(s) {
 }
 
 // Text of the Message output ("" when none). OK hides it on the controller.
+let noticeText = "";
 function showNotice(text) {
-  $("#notice-text").text(text);
+  noticeText = text || "";
+  $("#notice-text").text(tName(noticeText));
   $("#notice-banner").toggleClass("d-none", !text);
   updateMessagesCard();
 }
@@ -348,8 +358,9 @@ function showNotice(text) {
 let shownMessages = "";
 function updateMessagesCard() {
   const texts = [];
-  if (!$("#pause-banner").hasClass("d-none")) texts.push("P:" + $("#pause-message").text());
-  if (!$("#notice-banner").hasClass("d-none")) texts.push("N:" + $("#notice-text").text());
+  // the texts as the controller sends them, so a language change is no new message
+  if (!$("#pause-banner").hasClass("d-none")) texts.push("P:" + pauseMessage);
+  if (!$("#notice-banner").hasClass("d-none")) texts.push("N:" + noticeText);
   $("#msg-count").text(texts.length).toggleClass("d-none", texts.length === 0);
   $("#no-messages").toggleClass("d-none", texts.length > 0);
   const key = texts.join("\n");
@@ -427,7 +438,7 @@ function fetchState(force) {
 
 // Render RTC + sensors only
 function renderDashboard(s) {
-  $("#rtc").text("Time: " + (s.rtc || "--"));
+  $("#rtc").text(t("dash.time", { time: s.rtc || "--" }));
 
   $("#w_temp").text(s.w_temp ?? "--");
   $("#w_temp_bar").css("width", (s.w_temp ?? 0) + "%");
@@ -438,7 +449,7 @@ function renderDashboard(s) {
   $("#a_hum").text(s.a_hum ?? "--");
   $("#a_hum_bar").css("width", (s.a_hum ?? 0) + "%");
 
-  $("#level").text(s.Level ?? "--");
+  $("#level").text(s.Level ?? "--");      // LOW / OK / HIGH / NOK as the controller sends them
 
   const levelWidth =
     s.Level === "LOW" ? "25%" :
@@ -498,8 +509,8 @@ function tileTime(s) {
 // Stage length as "7 d", "21 d 12 h" or "open-ended"
 function stageLengthText(st) {
   const d = Number(st.days) || 0, h = Number(st.hours) || 0;
-  if (!d && !h) return "open-ended";
-  return (d ? d + " d" : "") + (d && h ? " " : "") + (h ? h + " h" : "");
+  if (!d && !h) return t("dash.open_ended");
+  return (d ? d + " " + t("unit.d") : "") + (d && h ? " " : "") + (h ? h + " " + t("unit.h") : "");
 }
 
 // Called with every /api/state answer
@@ -516,24 +527,24 @@ function updateStageState(s) {
 
 function renderStageTile() {
   const st = stageState;
-  let label = "Stage", name = "Single stage", days = "", pct = 0;
+  let label = t("dash.stage"), name = t("dash.stage_single"), days = "", pct = 0;
 
   if (st) {
-    label = `Stage ${st.index + 1}/${st.count}`;
-    name = st.name || "";
+    label = t("dash.stage_n_of", { n: st.index + 1, count: st.count });
+    name = tName(st.name || "");
     const day = Math.floor((st.elapsedMin || 0) / 1440) + 1;
     const total = st.lengthMin ? Math.ceil(st.lengthMin / 1440) : 0;
-    days = total ? `day ${day} of ${total}` : `day ${day}`;
+    days = total ? t("dash.day_of", { day: day, total: total }) : t("dash.day", { day: day });
     pct = st.lengthMin ? Math.min(100, 100 * st.elapsedMin / st.lengthMin) : 0;
   } else if (taskStatus === "finished" && stageList.length) {
-    label = `Stage ${stageList.length}/${stageList.length}`;
-    name = stageList[stageList.length - 1].name;
-    days = "done";
+    label = t("dash.stage_n_of", { n: stageList.length, count: stageList.length });
+    name = tName(stageList[stageList.length - 1].name);
+    days = t("dash.stage_done");
     pct = 100;
   } else if (stageList.length) {
-    label = `Stages: ${stageList.length}`;
-    name = stageList[0].name;
-    days = "starts with this one";
+    label = t("dash.stages_count", { count: stageList.length });
+    name = tName(stageList[0].name);
+    days = t("dash.starts_with_this");
   }
 
   $("#stageTileLabel").text(label);
@@ -578,12 +589,12 @@ function closePicker() {
 /* ---------- task tile ---------- */
 function openTaskPicker() {
   if (!taskList.length) return;
-  const items = taskList.map(t => ({
-    id: t.index,
-    label: t.name,
-    current: t.index === taskIndex
+  const items = taskList.map(x => ({
+    id: x.index,
+    label: tName(x.name),
+    current: x.index === taskIndex
   }));
-  openPicker("Task", items, it => {
+  openPicker(t("pick.task_title"), items, it => {
     if (it.id === taskIndex) { closePicker(); return; }
     if (!isTaskActive()) {
       // Nothing runs: just select it (the box handler tells the controller)
@@ -591,8 +602,9 @@ function openTaskPicker() {
       $("#taskSelect").val(it.id).trigger("change");
       return;
     }
-    const cur = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
-    askPicker(`Stop ${cur} and start ${it.label} now?`, "Start", () => {
+    const curTask = taskList.find(x => x.index === taskIndex);
+    const cur = curTask ? tName(curTask.name) : t("pick.the_task");
+    askPicker(t("pick.stop_and_start", { current: cur, next: it.label }), t("pick.btn_start"), () => {
       $("#taskSelect").val(it.id);
       requestTaskStart();
     });
@@ -605,19 +617,20 @@ function openStagePicker() {
   const curId = stageState ? stageState.id : null;
   const items = stageList.map((st, i) => ({
     id: st.id,
-    label: `${i + 1}. ${st.name}`,
+    label: `${i + 1}. ${tName(st.name)}`,
     sub: (st.days !== undefined || st.hours !== undefined) ? stageLengthText(st) : "",
     current: st.id === curId,
-    name: st.name
+    name: tName(st.name)
   }));
-  openPicker("Stage", items, it => {
+  openPicker(t("pick.stage_title"), items, it => {
     if (it.id === curId) { closePicker(); return; }
     if (isTaskActive()) {
-      askPicker(`Switch to ${it.name} now?`, "Switch", () => requestSetStage(it.id));
+      askPicker(t("pick.switch_to", { stage: it.name }), t("pick.btn_switch"), () => requestSetStage(it.id));
       return;
     }
-    const task = (taskList.find(t => t.index === taskIndex) || {}).name || "the task";
-    askPicker(`Start ${task} at ${it.name} now?`, "Start", () => {
+    const curTask = taskList.find(x => x.index === taskIndex);
+    const task = curTask ? tName(curTask.name) : t("pick.the_task");
+    askPicker(t("pick.start_at", { task: task, stage: it.name }), t("pick.btn_start"), () => {
       startAtStage = it.id;
       requestTaskStart();
     });
@@ -665,3 +678,16 @@ function initTiles() {
   });
   renderStageTile();
 }
+
+// Language changed: redraw what the Dashboard built in JS
+onLanguageChange(() => {
+  if (!initialized.dashboard) return;
+  if (!presetListLoading && taskList.length) updateTaskUI(taskStatus);
+  renderStageTile();
+  $("#outputs-dashboard .channel-row").each(function () {
+    const cfg = outputsConfig.find(c => String(c.id) === String($(this).data("id")));
+    $(this).find(".out-label").text(outLabel(cfg));
+  });
+  showNotice(noticeText);
+  if ($("#pickModal").hasClass("show")) closePicker();   // its texts were built for the old language
+});

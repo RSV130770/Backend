@@ -2,7 +2,7 @@
 
   <div class="card mb-3">
     <div class="card-header bg-info text-white">
-      <h5 class="mb-0">Dashboard</h5>
+      <h5 class="mb-0" data-i18n="nav.dashboard">Dashboard</h5>
     </div>
 
     <div class="card-body">
@@ -10,14 +10,14 @@
       <!-- ROW 1: Task and stage tiles (tap a tile to choose) -->
       <div class="row mb-3">
         <div class="col-6 pl-0 pr-1">
-          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task">
-            <div class="dash-tile-label">Task</div>
-            <div class="dash-tile-value" id="taskSelectLabel">Loading...</div>
+          <div class="dash-tile" id="taskTile" role="button" tabindex="0" aria-label="Choose task" data-i18n-aria="dash.task_choose">
+            <div class="dash-tile-label" data-i18n="dash.task">Task</div>
+            <div class="dash-tile-value" id="taskSelectLabel" data-i18n="common.loading">Loading...</div>
             <div class="dash-tile-sub" id="taskStatusLabel"></div>
           </div>
         </div>
         <div class="col-6 pr-0 pl-1">
-          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage">
+          <div class="dash-tile" id="stageTile" role="button" tabindex="0" aria-label="Choose stage" data-i18n-aria="dash.stage_choose">
             <div class="dash-tile-label" id="stageTileLabel">Stage</div>
             <div class="dash-tile-value" id="stageTileName">--</div>
             <div class="dash-tile-sub" id="stageTileDays"></div>
@@ -33,7 +33,7 @@
       <!-- ROW 2: Start time + buttons -->
       <div class="row mb-3 align-items-end">
         <div class="col-6 text-right p-0">
-          <button class="btn btn-success btn-small mr-2" id="taskStart">
+          <button class="btn btn-success btn-small mr-2" id="taskStart" title="Start" data-i18n-title="dash.btn_start">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <path d="M4 3.3v9.4L12 8 4 3.3z" />
             </svg>
@@ -45,7 +45,7 @@
             </svg>
           </button>
 
-          <button class="btn btn-danger btn-small" id="taskStop">
+          <button class="btn btn-danger btn-small" id="taskStop" title="Stop" data-i18n-title="dash.btn_stop">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <rect x="4" y="4" width="8" height="8" />
             </svg>
@@ -57,22 +57,22 @@
       <div class="card mt-3" id="messages-card">
         <div class="card-header dash-fold" data-toggle="collapse" data-target="#messages-body"
              role="button" aria-expanded="true" aria-controls="messages-body">
-          <span>Messages <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
+          <span><span data-i18n="dash.messages">Messages</span> <span id="msg-count" class="badge badge-pill badge-warning d-none">0</span></span>
           <span class="dash-chevron" aria-hidden="true"></span>
         </div>
         <div id="messages-body" class="collapse show">
           <div class="card-body pb-1">
-            <div id="no-messages" class="text-muted small mb-2">No messages</div>
+            <div id="no-messages" class="text-muted small mb-2" data-i18n="dash.no_messages">No messages</div>
             <!-- The task reached a pause point and waits for the user -->
             <div id="pause-banner" class="alert alert-warning d-none" role="status">
-              <div class="font-weight-bold">The task is waiting</div>
+              <div class="font-weight-bold" data-i18n="dash.task_waiting">The task is waiting</div>
               <div id="pause-message" class="mb-2"></div>
-              <button class="btn btn-warning btn-small" id="pause-continue">Continue</button>
+              <button class="btn btn-warning btn-small" id="pause-continue" data-i18n="dash.continue">Continue</button>
             </div>
             <!-- Text of the Message output; OK hides it -->
             <div id="notice-banner" class="alert alert-info d-none" role="status">
               <div id="notice-text" class="mb-2"></div>
-              <button class="btn btn-info btn-small" id="notice-ok">OK</button>
+              <button class="btn btn-info btn-small" id="notice-ok" data-i18n="common.ok">OK</button>
             </div>
           </div>
         </div>
@@ -80,7 +80,7 @@
 
       <!-- Inputs -->
       <div class="card mt-3">
-        <div class="card-header">Inputs</div>
+        <div class="card-header" data-i18n="dash.inputs">Inputs</div>
         <div class="card-body">
           <div class="row">
 
@@ -92,7 +92,7 @@
                 </div>
                 <div class="value-big text-center" id="w_temp">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Water Temp</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.water_temp">Water Temp</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="w_temp_bar" class="progress-bar bg-info" style="width:0%"></div>
               </div>
@@ -106,7 +106,7 @@
                 </div>
                 <div class="value-big text-center" id="a_temp">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Air Temp</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.air_temp">Air Temp</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="a_temp_bar" class="progress-bar bg-danger" style="width:0%"></div>
               </div>
@@ -120,7 +120,7 @@
                 </div>
                 <div class="value-big text-center" id="a_hum">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Air Humidity</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.air_humidity">Air Humidity</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="a_hum_bar" class="progress-bar bg-success" style="width:0%"></div>
               </div>
@@ -134,7 +134,7 @@
                 </div>
                 <div class="value-big text-center" id="level">--</div>
               </div>
-              <div class="text-center mt-1"><strong>Level</strong></div>
+              <div class="text-center mt-1"><strong data-i18n="dash.level">Level</strong></div>
               <div class="progress mt-2" style="height: 8px;">
                 <div id="level_bar" class="progress-bar bg-secondary" style="width:0%"></div>
               </div>
@@ -148,7 +148,7 @@
       <div class="card mt-3">
         <div class="card-header dash-fold" data-toggle="collapse" data-target="#outputs-body"
              role="button" aria-expanded="true" aria-controls="outputs-body">
-          <span>Outputs</span>
+          <span data-i18n="dash.outputs">Outputs</span>
           <span class="dash-chevron" aria-hidden="true"></span>
         </div>
         <div id="outputs-body" class="collapse show">

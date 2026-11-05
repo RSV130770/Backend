@@ -15,7 +15,7 @@ function renderSchedule(list) {
 
   // A task without stages is one open-ended stage
   if (!Array.isArray(taskStages) || taskStages.length === 0)
-    taskStages = [newStage(1, 'Stage 1', 0, 0)];
+    taskStages = [newStage(1, t('sch.stage_default_name', { n: 1 }), 0, 0)];
   const known = new Set(taskStages.map(st => Number(st.id)));
   const firstStage = Number(taskStages[0].id);
 
@@ -82,7 +82,7 @@ function buildTreeNode(events) {
         <span class="tree-node-channels">${escapeHtml(nodeLabel)}</span>
       </div>
       <div class="tree-actions">
-        <button class="tree-edit-btn" title="Edit">✏</button>
+        <button class="tree-edit-btn" title="${escapeHtml(t('common.edit'))}" data-i18n-title="common.edit">✏</button>
       </div>
     </div>
     <div class="tree-leaves collapse" id="${collapseId}"></div>
@@ -156,8 +156,8 @@ function newStage(id, name, days, hours) {
 
 function stageLengthText(st) {
   const d = Number(st.days) || 0, h = Number(st.hours) || 0;
-  if (!d && !h) return 'open-ended';
-  return (d ? d + ' d' : '') + (d && h ? ' ' : '') + (h ? h + ' h' : '');
+  if (!d && !h) return t('dash.open_ended');
+  return (d ? d + ' ' + t('unit.d') : '') + (d && h ? ' ' : '') + (h ? h + ' ' + t('unit.h') : '');
 }
 
 function stageIsOpen(st) {
@@ -186,15 +186,15 @@ function buildStageNode(st) {
       <div class="stage-label">
         <span class="stage-num"></span><span class="stage-name"></span>
         <span class="stage-len"></span>
-        <span class="stage-pause d-none" title="Pauses at its end">⏸</span>
+        <span class="stage-pause d-none" title="${escapeHtml(t('sch.pauses_at_end'))}" data-i18n-title="sch.pauses_at_end">⏸</span>
       </div>
       <div class="tree-actions">
-        <button class="stage-add-btn" title="Add a group to this stage">+</button>
-        <button class="tree-edit-btn" title="Edit stage">✏</button>
+        <button class="stage-add-btn" title="${escapeHtml(t('sch.add_group_tip'))}" data-i18n-title="sch.add_group_tip">+</button>
+        <button class="tree-edit-btn" title="${escapeHtml(t('sch.edit_stage'))}" data-i18n-title="sch.edit_stage">✏</button>
       </div>
     </div>
     <div class="stage-groups collapse show">
-      <div class="stage-empty text-muted small">No groups yet. Tap + to add one.</div>
+      <div class="stage-empty text-muted small" data-i18n="sch.no_groups">${escapeHtml(t('sch.no_groups'))}</div>
     </div>
   </div>`);
   $s.data('stage', Object.assign({}, st, { id: Number(st.id) }));
@@ -231,7 +231,7 @@ function refreshStageHeaders() {
     const st = $s.data('stage');
     $s.attr('data-stage-id', st.id);
     $s.find('.stage-num').text(`${i + 1}. `);
-    $s.find('.stage-name').text(st.name || 'Stage');
+    $s.find('.stage-name').text(tName(st.name) || t('dash.stage'));
     $s.find('.stage-len').text(stageLengthText(st));
     $s.find('.stage-pause').toggleClass('d-none', !(st.endPause && !stageIsOpen(st)));
     $s.find('.stage-empty').toggle($s.find('.tree-node').length === 0);
@@ -244,7 +244,7 @@ function collectStages() {
     const st = $(this).data('stage');
     return {
       id: st.id,
-      name: (st.name || '').trim() || 'Stage',
+      name: (st.name || '').trim() || t('dash.stage'),
       days: Number(st.days) || 0,
       hours: Number(st.hours) || 0,
       endPause: !!st.endPause && !stageIsOpen(st),
@@ -276,9 +276,8 @@ function updateStageModalHints() {
   const open = !d && !h;
   const last = stageModalIsLast();
   let hint = '';
-  if (open) hint = last ? 'Open-ended: it runs until Stop.'
-                        : 'Only the last stage can be open-ended.';
-  else if (last) hint = 'The last stage: when it ends, the task is finished.';
+  if (open) hint = t(last ? 'stage.hint_open' : 'stage.hint_only_last_open');
+  else if (last) hint = t('stage.hint_last');
   $('#stage-len-hint').text(hint);
   $('#stage-end-group').toggle(!open);
   $('#stage-message').toggle($('#stage-end-pause').is(':checked'));
@@ -289,7 +288,7 @@ function updateStageModalHints() {
   $('#stage-up').prop('disabled', idx <= 0);
   $('#stage-down').prop('disabled', idx < 0 || idx >= $all.length - 1);
   $('#stage-delete-btn').toggle(!!stageModalNode).prop('disabled', $all.length <= 1);
-  $('#stage-title').text(stageModalNode ? `Stage ${idx + 1} of ${$all.length}` : 'New stage');
+  $('#stage-title').text(stageModalNode ? t('stage.title_n_of', { n: idx + 1, count: $all.length }) : t('stage.title_new'));
 }
 
 function openStageModal($stage) {
@@ -338,9 +337,9 @@ function askDeleteStage() {
   if (!stageModalNode || stageNodes().length <= 1) return;
   const st = stageModalNode.data('stage');
   const n = stageModalNode.find('.tree-node').length;
-  $('#stage-delete-text').text(n
-    ? `Delete ${st.name || 'this stage'} and its ${n} group${n > 1 ? 's' : ''}?`
-    : `Delete ${st.name || 'this stage'}?`);
+  const name = tName(st.name) || t('dash.stage');
+  $('#stage-delete-text').text(n ? t('stage.delete_with_groups', { name: name, count: n })
+                                 : t('stage.delete', { name: name }));
   $('#stage-delete-confirm').removeClass('d-none');
 }
 
@@ -364,11 +363,11 @@ function saveStage() {
   };
   $('#stage-name, #stage-message').removeClass('is-invalid');
 
-  if (!name) return fail('Enter a name for the stage.', $('#stage-name'));
+  if (!name) return fail(t('stage.err_name'), $('#stage-name'));
   if (!days && !hours && !stageModalIsLast())
-    return fail('Only the last stage can be open-ended: give it a length.');
+    return fail(t('stage.err_open_last'));
   if (endPause && !message)
-    return fail('Enter the message shown while the task waits.', $('#stage-message'));
+    return fail(t('stage.err_message'), $('#stage-message'));
 
   const values = { name, days, hours, endPause: !!endPause, message: endPause ? message : '' };
   if (stageModalNode) {
@@ -385,7 +384,7 @@ function saveStage() {
 
 function leafDutyText(ev) {
   const duty = parseInt(ev.duty) || 0;
-  return duty === 0 ? 'OFF' : duty === 100 ? 'ON' : `${duty}%`;
+  return duty === 0 ? t('sch.duty_off') : duty === 100 ? t('sch.duty_on') : `${duty}%`;
 }
 
 // Short duration: 10s, 5m, 1h, 1h30m, 1m30s
@@ -411,21 +410,31 @@ function leafTimeText(ev) {
 // Stored in the event's "time" as HH:MM: the firmware adds it to the start
 // (CustomEvent::computeActivation). "--:--" or empty means no offset.
 function customOffsetSec(ev) {
-  const t = ev.time;
-  if (!t || t === '--:--') return 0;
-  return timeToSeconds(t);
+  const tm = ev.time;
+  if (!tm || tm === '--:--') return 0;
+  return timeToSeconds(tm);
+}
+
+// Label and level text of a leaf (also redrawn on a language change)
+function leafTexts(ev) {
+  const isPause = ev.repeat === 'freeze';
+  const isMsg = isMessageEvent(ev);
+  const isSnd = isSoundEvent(ev);
+  const cfg = outputsConfig.find(c => c.id == ev.channelId);
+  const on = parseInt(ev.duty) > 0;
+  const label = isPause ? `⏸ ${tName(ev.message) || t('sch.leaf_pause')}`
+              : isMsg ? (on ? `✉ ${tName(ev.message) || t('sch.leaf_message')}` : `✉ ${t('sch.leaf_message')}`)
+              : isSnd ? (on ? `♪ ${ev.sound || t('sch.leaf_sound')}` : `♪ ${t('sch.leaf_sound')}`)
+              : (cfg ? outLabel(cfg) : `Ch${ev.channelId}`);
+  const duty = isPause ? t('sch.duty_wait') : isMsg ? t(on ? 'sch.duty_show' : 'sch.duty_hide') : leafDutyText(ev);
+  return { label: label, duty: duty };
 }
 
 function createLeaf(ev, groupId) {
   const isPause = ev.repeat === 'freeze';
   const isMsg = isMessageEvent(ev);
   const isSnd = isSoundEvent(ev);
-  const cfg = outputsConfig.find(c => c.id == ev.channelId);
-  const label = isPause ? `⏸ ${ev.message || 'Pause'}`
-              : isMsg ? (parseInt(ev.duty) > 0 ? `✉ ${ev.message || 'Message'}` : '✉ Message')
-              : isSnd ? (parseInt(ev.duty) > 0 ? `♪ ${ev.sound || 'Sound'}` : '♪ Sound')
-              : (cfg ? cfg.label : `Ch${ev.channelId}`);
-  const dutyText = isPause ? 'WAIT' : isMsg ? (parseInt(ev.duty) > 0 ? 'SHOW' : 'HIDE') : leafDutyText(ev);
+  const { label, duty: dutyText } = leafTexts(ev);
   const noEdit = isPause || isMsg || isSnd;     // edited in the group dialog
   const enabled = ev.enabled !== false;
 
@@ -436,8 +445,8 @@ function createLeaf(ev, groupId) {
     <span class="tree-leaf-label">${escapeHtml(label)}</span>
     <span class="tree-leaf-duty">${dutyText}</span>
     <div class="tree-actions">
-      <button class="tree-edit-btn${noEdit ? ' invisible' : ''}" title="Edit">✏</button>
-      <button class="tree-remove-btn" title="Remove">×</button>
+      <button class="tree-edit-btn${noEdit ? ' invisible' : ''}" title="${escapeHtml(t('common.edit'))}" data-i18n-title="common.edit">✏</button>
+      <button class="tree-remove-btn" title="${escapeHtml(t('common.remove'))}" data-i18n-title="common.remove">×</button>
     </div>
   </div>
 `);
@@ -550,14 +559,14 @@ function buildNodeSummary(events) {
     })
     .map(ev => {
       const cfg = outputsConfig.find(c => c.id == ev.channelId);
-      return cfg ? cfg.label : `Ch${ev.channelId}`;
+      return cfg ? outLabel(cfg) : `Ch${ev.channelId}`;
     }).join(', ');
 
   // The user's name for the group if there is one, otherwise the channels;
   // a group that pauses the task is marked
   const pause = groupPause(events);
   const nodeLabel = (pause ? '⏸ ' : '') +
-    (groupNameOf(events) || channelList || (pause ? (pause.message || 'Pause') : ''));
+    (tName(groupNameOf(events)) || channelList || (pause ? (tName(pause.message) || t('sch.leaf_pause')) : ''));
 
   const first = events.find(e => e.repeat !== 'freeze') || events[0];
   const repeat = groupRepeat(events);
@@ -578,10 +587,10 @@ function buildNodeSummary(events) {
   const nodeDays = days.join(' : ');
 
   // Everything else goes into the tooltip; the leaves show the details
-  const when = (repeat === 'custom') ? `${leafTimeText(first)} cycle` : nodeTime;
+  const when = (repeat === 'custom') ? t('sch.cycle', { time: leafTimeText(first) }) : nodeTime;
   const pauseEv = groupPause(events);
   const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}` +
-    (pauseEv ? ` · pause: ${pauseEv.message || ''}` : '');
+    (pauseEv ? ' · ' + t('sch.pause_info', { message: tName(pauseEv.message) || '' }) : '');
   return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList };
 }
 
@@ -645,9 +654,9 @@ function convertFromMs(ms) {
 }
 
 function updateScheduleHeader() {
-  const task = taskList.find(t => t.index === taskIndex);
-  const name = task ? task.name : "--";
-  $("#schedule-task-name").text(taskIndex === 0 ? name + " (template)" : name);
+  const task = taskList.find(x => x.index === taskIndex);
+  const name = task ? tName(task.name) : "--";
+  $("#schedule-task-name").text(taskIndex === 0 ? name + " " + t("sch.template_mark") : name);
   // The template cannot be deleted
   $("#delete-btn").prop("disabled", !task || taskIndex === 0);
 }
@@ -682,7 +691,7 @@ function buildScheduleChannelDropdown() {
   }
 
   outputsConfig.forEach(opt => {
-    sel.append(`<option value="${opt.id}">${opt.id}: ${opt.label}</option>`);
+    sel.append($('<option>').val(opt.id).text(`${opt.id}: ${outLabel(opt)}`));
   });
 }
 
@@ -720,7 +729,7 @@ function updateFieldsForOutputMode(mode) {
       ensureCollapseHidden('#edit-duty-numeric-group');
       // hide toggle, show numeric	
       ensureCollapseShown('#edit-duty-toggle-group');
-      $('#edit-duty-toggle-label').text($('#edit-duty-toggle').is(':checked') ? 'On' : 'Off');
+      $('#edit-duty-toggle-label').text(t($('#edit-duty-toggle').is(':checked') ? 'common.on' : 'common.off'));
       break;
 
     case "softstart":
@@ -768,7 +777,7 @@ function applyDefaultParamsForMode(mode, channelId) {
   if (dutyEmpty) {
     $('#edit-duty').val(0);
     $('#edit-duty-toggle').prop('checked', false);
-    $('#edit-duty-toggle-label').text('Off');
+    $('#edit-duty-toggle-label').text(t('common.off'));
 
   }
 
@@ -817,7 +826,7 @@ function bindScheduleUI() {
 
   // Duty toggle label sync (if toggle exists)
   $('#edit-duty-toggle').on('change', function () {
-    $('#edit-duty-toggle-label').text(this.checked ? 'On' : 'Off');
+    $('#edit-duty-toggle-label').text(t(this.checked ? 'common.on' : 'common.off'));
   });
 
   // Buttons
@@ -862,9 +871,8 @@ function showPresetSchedule(data) {
   taskStages = Array.isArray(data.stages) ? data.stages : [];
   renderSchedule(taskContent);
   if (!Array.isArray(data.schedule) && Array.isArray(data.phases)) {
-    $('#schedule-tree').html(
-      '<p class="text-muted m-2">This is a plant preset made of growth phases. ' +
-      'It can be started from the Dashboard but not edited here.</p>');
+    $('#schedule-tree').html('<p class="text-muted m-2" data-i18n="sch.plant_preset"></p>');
+    $('#schedule-tree p').text(t('sch.plant_preset'));
   }
 }
 
@@ -963,7 +971,7 @@ function openBatchModal($row, newGroupId, stageId) {
     buildBatchChannelList(existingEvents, newRepeat);
     Object.keys(levels).forEach(ch => {
       const v = levels[ch];
-      if (typeof v === 'boolean') $(`#batch-toggle-${ch}`).prop('checked', v).next('label').text(v ? 'On' : 'Off');
+      if (typeof v === 'boolean') $(`#batch-toggle-${ch}`).prop('checked', v).next('label').text(t(v ? 'common.on' : 'common.off'));
       else $(`.batch-duty-input[data-channel="${ch}"]`).val(v);
     });
   });
@@ -979,18 +987,18 @@ function updateBatchTimeFields(repeat) {
   // Durations need seconds; clock times do not
   $('#batch-time-on, #batch-time-off').attr('step', repeat === 'custom' ? 1 : 60);
   if (repeat === 'daily') {
-    $('#batch-time-on-label').text('Time On');
+    $('#batch-time-on-label').text(t('batch.time_on'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').show();
-    $('#batch-time-off-label').text('Time Off');
+    $('#batch-time-off-label').text(t('batch.time_off'));
   } else if (repeat === 'custom') {
-    $('#batch-time-on-label').text('On Duration');
+    $('#batch-time-on-label').text(t('batch.on_duration'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').show();
-    $('#batch-time-off-label').text('Off Duration');
+    $('#batch-time-off-label').text(t('batch.off_duration'));
   } else {
     // once
-    $('#batch-time-on-label').text('Time');
+    $('#batch-time-on-label').text(t('common.time'));
     $('#batch-time-on-group').show();
     $('#batch-time-off-group').hide();
   }
@@ -1012,17 +1020,15 @@ function buildBatchChannelList(existingEvents, repeat) {
   // Two areas of channel tiles, then the settings of the chosen channels
   $list.append(`
     <div class="ch-zone ch-zone-in" data-zone="in">
-      <div class="ch-zone-title">In this group</div>
+      <div class="ch-zone-title">${escapeHtml(t('batch.in_group'))}</div>
       <div class="ch-tiles"></div>
-      <div class="ch-zone-empty">Drag channels here or tap them</div>
+      <div class="ch-zone-empty">${escapeHtml(t('batch.drag_hint'))}</div>
     </div>
     <div class="ch-zone ch-zone-out" data-zone="out">
-      <div class="ch-zone-title">Available</div>
+      <div class="ch-zone-title">${escapeHtml(t('batch.available'))}</div>
       <div class="ch-tiles"></div>
     </div>
-    <div id="batch-channel-error" class="text-danger small mb-2" style="display:none;">
-      Add at least one channel to the group.
-    </div>
+    <div id="batch-channel-error" class="text-danger small mb-2" style="display:none;">${escapeHtml(t('batch.err_no_channel'))}</div>
     <div class="ch-settings"></div>`);
 
   const $settings = $list.find('.ch-settings');
@@ -1045,10 +1051,10 @@ function buildBatchChannelList(existingEvents, repeat) {
       // let its stage end with a pause: stage dialog.)
       $settings.append(`
         <div class="batch-channel-row batch-msg-row" data-channel="${cfg.id}">
-          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
           <div class="batch-msg-fields">
             <input type="text" class="form-control" id="batch-msg-text" maxlength="60"
-                   placeholder="Text, e.g. Remove the lid" autocomplete="off"
+                   placeholder="${escapeHtml(t('batch.message_ph'))}" autocomplete="off"
                    value="${escapeHtml(batchMsgText)}">
           </div>
         </div>`);
@@ -1060,10 +1066,10 @@ function buildBatchChannelList(existingEvents, repeat) {
       // day, custom: every cycle)
       $settings.append(`
         <div class="batch-channel-row batch-msg-row batch-sound-row" data-channel="${cfg.id}">
-          <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+          <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
           <div class="batch-msg-fields d-flex align-items-center">
             <select class="form-control mr-2" id="batch-sound-file"></select>
-            <input type="number" class="form-control batch-duty-input" title="Volume, %"
+            <input type="number" class="form-control batch-duty-input" title="${escapeHtml(t('batch.volume_tip'))}"
                    data-channel="${cfg.id}" value="${duty || 50}" min="1" max="100" style="width:80px;">
             <span class="ml-1">%</span>
           </div>
@@ -1080,7 +1086,7 @@ function buildBatchChannelList(existingEvents, repeat) {
           <input type="checkbox" class="custom-control-input batch-duty-toggle"
                  id="batch-toggle-${cfg.id}" data-channel="${cfg.id}" ${checked}>
           <label class="custom-control-label" for="batch-toggle-${cfg.id}">
-            ${duty >= 50 ? 'On' : 'Off'}
+            ${escapeHtml(t(duty >= 50 ? 'common.on' : 'common.off'))}
           </label>
         </div>`;
     } else {
@@ -1092,7 +1098,7 @@ function buildBatchChannelList(existingEvents, repeat) {
 
     $settings.append(`
       <div class="batch-channel-row" data-channel="${cfg.id}">
-        <div class="batch-channel-label">${escapeHtml(cfg.label)}</div>
+        <div class="batch-channel-label">${escapeHtml(outLabel(cfg))}</div>
         <div class="batch-channel-duty">${dutyInput}</div>
       </div>
     `);
@@ -1106,7 +1112,7 @@ function buildBatchChannelList(existingEvents, repeat) {
 
   // Toggle label sync
   $list.find('.batch-duty-toggle').on('change', function () {
-    $(this).next('label').text(this.checked ? 'On' : 'Off');
+    $(this).next('label').text(t(this.checked ? 'common.on' : 'common.off'));
   });
 
   renderChannelTiles();
@@ -1127,7 +1133,7 @@ function renderChannelTiles() {
         <div class="pic" style="${cfg.style || ''}">
           <img src="${cfg.icon || '/sun.svg'}" style="${invert}" width="24" height="24" alt="">
         </div>
-        <span class="ch-tile-label">${escapeHtml(cfg.label)}</span>
+        <span class="ch-tile-label">${escapeHtml(outLabel(cfg))}</span>
       </div>`);
     (batchMembers.has(Number(cfg.id)) ? $in : $out).append($tile);
     $list.find(`.batch-channel-row[data-channel="${cfg.id}"]`)
@@ -1412,7 +1418,7 @@ function openLeafModal($leaf, groupId) {
   $('#edit-duty').val(duty);
   if ($('#edit-duty-toggle').length) {
     $('#edit-duty-toggle').prop('checked', duty >= 50);
-    $('#edit-duty-toggle-label').text(duty >= 50 ? 'On' : 'Off');
+    $('#edit-duty-toggle-label').text(t(duty >= 50 ? 'common.on' : 'common.off'));
   }
 
   // Rise/Fall — preserve existing values silently
@@ -1440,8 +1446,8 @@ function openLeafModal($leaf, groupId) {
   $('#edit-enabled').closest('.form-group').hide();
 
   // Show channel name in modal title instead
-  const label = cfg ? cfg.label : `Ch${ev.channelId}`;
-  $('#editModal .modal-title').text(`Edit: ${label}`);
+  const label = cfg ? outLabel(cfg) : `Ch${ev.channelId}`;
+  $('#editModal .modal-title').text(t('item.title_named', { name: label }));
 
   $('#editModal')
     .off('shown.bs.modal.scheduleInit')
@@ -1508,8 +1514,7 @@ function applyScheduleToServer() {
   const openIdx = stages.findIndex(stageIsOpen);
   if (openIdx >= 0 && openIdx < stages.length - 1) {
     $('#schedule-error').removeClass('d-none').text(
-      `${stages[openIdx].name} is open-ended, so it has to be the last stage. ` +
-      'Give it a length or move it to the end.');
+      t('sch.err_open_not_last', { name: tName(stages[openIdx].name) }));
     return;
   }
   $('#schedule-error').addClass('d-none');
@@ -1539,8 +1544,8 @@ function showSaveAsDialog() {
   $('#save-as-error').hide().text('');
   $('#save-as-hint').text(
     isDefault
-      ? 'The template stays as it is. Enter a name for the new task.'
-      : 'Save keeps this task (a new name renames it). Save as new creates a copy.'
+      ? t('save.hint_template')
+      : t('save.hint_task')
   );
   $('#save-as-confirm').toggle(!isDefault);
   $('#save-as-new').toggleClass('btn-primary', isDefault).toggleClass('btn-outline-primary', !isDefault);
@@ -1551,12 +1556,12 @@ function showSaveAsDialog() {
     const name = $('#new-task-name').val().trim();
     let error = '';
     if (!name) {
-      error = 'Please enter a task name.';
+      error = t('save.err_name');
     } else if (name.toLowerCase() === 'default') {
-      error = '"Default" is the name of the template. Please choose another name.';
-    } else if (taskList.some(t => t.index !== keepId && t.index !== 0 &&
-                                  String(t.name).toLowerCase() === name.toLowerCase())) {
-      error = `A task named "${name}" already exists. Please choose another name.`;
+      error = t('save.err_default');
+    } else if (taskList.some(x => x.index !== keepId && x.index !== 0 &&
+                                  String(x.name).toLowerCase() === name.toLowerCase())) {
+      error = t('save.err_exists', { name: name });
     }
     if (error) {
       $('#save-as-error').text(error).show();
@@ -1609,7 +1614,7 @@ function sendScheduleToServer(index, name) {
 
       // Same task saved again, possibly under a new name: rename it everywhere
       if (resp.id && resp.id === taskIndex) {
-        const task = taskList.find(t => t.index === taskIndex);
+        const task = taskList.find(x => x.index === taskIndex);
         if (task) task.name = currentTaskName;
         $(`#taskSelect option[value="${taskIndex}"]`).text(currentTaskName);
         updateScheduleHeader();
@@ -1641,7 +1646,7 @@ function sendScheduleToServer(index, name) {
     },
     error: xhr => {
       console.warn("/preset/save failed:", xhr.status, xhr.responseText);
-      alert("Saving failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+      alert(t("save.failed", { error: (xhr.responseJSON && xhr.responseJSON.error) || xhr.status }));
     }
   });
 }
@@ -1652,7 +1657,7 @@ function sendScheduleToServer(index, name) {
 function showDeleteDialog() {
   if (taskIndex === 0) return;   // the template cannot be deleted
   const running = (taskStatus === 'running' || taskStatus === 'paused');
-  $('#delete-task-name').text(currentTaskName || '');
+  $('#delete-text').text(t('del.will_be_deleted', { name: tName(currentTaskName || '') }));
   $('#delete-running-hint').toggle(running);
   $('#deleteModal').modal({ backdrop: 'static', keyboard: false });
   $('#deleteModal').modal('show');
@@ -1668,9 +1673,9 @@ function deleteCurrentTask() {
     data: JSON.stringify({ id: id }),
     success: () => {
       // Forget the preset and show the next one (the template if none left)
-      taskList = taskList.filter(t => t.index !== id);
+      taskList = taskList.filter(x => x.index !== id);
       $(`#taskSelect option[value="${id}"]`).remove();
-      if (!taskList.some(t => t.index === 0)) {
+      if (!taskList.some(x => x.index === 0)) {
         taskList.unshift({ index: 0, name: 'Default', builtIn: true });
         $('#taskSelect').prepend('<option value="0">Default</option>');
       }
@@ -1688,7 +1693,7 @@ function deleteCurrentTask() {
     },
     error: xhr => {
       console.warn("/preset/delete failed:", xhr.status, xhr.responseText);
-      alert("Deleting failed: " + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status));
+      alert(t("del.failed", { error: (xhr.responseJSON && xhr.responseJSON.error) || xhr.status }));
     }
   });
 }
@@ -1731,3 +1736,21 @@ function buildRepeatString() {
   if (val === 'custom') return 'custom';
   return val || 'daily';
 }
+
+// Language changed: redraw the tree's texts in place, so edits that are not
+// saved yet stay as they are
+onLanguageChange(() => {
+  if (!initialized.schedule) return;
+  updateScheduleHeader();
+  refreshStageHeaders();
+  $('#schedule-tree .tree-leaf').each(function () {
+    const ev = $(this).data('event');
+    if (!ev) return;
+    const tx = leafTexts(ev);
+    $(this).find('.tree-leaf-label').text(tx.label);
+    $(this).find('.tree-leaf-duty').text(tx.duty);
+  });
+  $('#schedule-tree .tree-node').each(function () { refreshNodeSummary($(this)); });
+  buildScheduleChannelDropdown();
+  $('#schedule-error').addClass('d-none');      // shown again on the next Apply
+});

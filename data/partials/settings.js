@@ -40,9 +40,7 @@ function _ipModeManual() { return $("#ip-mode-manual").is(":checked"); }
 function _applyIpMode() {
   const manual = _ipModeManual();
   $(".ip-field").prop("disabled", !manual);
-  $("#ip-mode-hint").text(manual
-    ? "Type the address yourself. It must be free and in your home network."
-    : "The farm takes a free address .200–.249 in your network and keeps it.");
+  $("#ip-mode-hint").text(t(manual ? "set.ip_manual_hint" : "set.ip_auto_hint"));
   if (manual && homeInfo) {
     // start from the saved manual values, else from what is in use now
     const m = homeInfo.manual || {};
@@ -65,21 +63,28 @@ function _showHome(h) {
   }
   if (!h || h.state === "off") { box.hide(); _followHome(false); return; }
 
-  const net = _esc(h.ssid || "home network");
+  // Texts are escaped first; the network name goes in as bold HTML
+  const net = `<strong>${_esc(h.ssid || t("set.home_network"))}</strong>`;
+  const th = (key, p) => {
+    // t() with HTML values: escape the text, then put the values in
+    let s = _esc(t(key));
+    Object.keys(p || {}).forEach(k => { s = s.split("{" + k + "}").join(p[k]); });
+    return s;
+  };
   let html = "";
   if (h.state === "connected" && h.ip) {
     const url = "http://" + h.ip + "/";
-    html = `Connected to <strong>${net}</strong>.<br>Farm at home: ` +
+    html = th("set.st_connected", { ssid: net }) + "<br>" + th("set.st_farm_at_home") + " " +
            `<a href="${url}" target="_blank" rel="noopener" class="font-weight-bold" id="home-link">${_esc(url)}</a>` +
-           `<span class="text-muted d-block mt-1">Open it from a phone or PC on ${net}` +
-           `${h.hostname ? " · name in the router: " + _esc(h.hostname) : ""}</span>`;
-    if (h.kind === "dhcp") html += `<span class="d-block mt-1">The router's address is used: it may change.</span>`;
+           `<span class="text-muted d-block mt-1">` + th("set.st_open_from", { ssid: _esc(h.ssid || t("set.home_network")) }) +
+           (h.hostname ? " · " + th("set.st_router_name", { name: _esc(h.hostname) }) : "") + `</span>`;
+    if (h.kind === "dhcp") html += `<span class="d-block mt-1">` + th("set.st_router_address") + `</span>`;
   } else if (h.state === "retry") {
     const min = h.retryIn ? Math.max(1, Math.round(h.retryIn / 60)) : 0;
-    html = `Not connected to <strong>${net}</strong>.` + (min ? ` Next try in ${min} min.` : "");
+    html = th("set.st_not_connected", { ssid: net }) + (min ? " " + th("set.st_next_try", { min: min }) : "");
   } else {
     html = `<span class="spinner-border spinner-border-sm mr-1" role="status"></span>` +
-           `Connecting to <strong>${net}</strong>…`;
+           th("set.st_connecting", { ssid: net });
   }
   if (h.note) html += `<span class="d-block mt-1 text-warning-dark">${_esc(h.note)}</span>`;
   box.html(html).show();
@@ -99,7 +104,7 @@ function _showHome(h) {
   }
   const ip = h.ip || "";
   $("#ip-reserve-hint").text(ip && h.hostname
-    ? `To be sure the address stays free, reserve ${ip} for ${h.hostname} in your router.` : "")
+    ? t("set.st_reserve", { ip: ip, name: h.hostname }) : "")
     .toggle(!!(ip && h.hostname));
 
   _followHome(["connecting", "checking", "switching"].includes(h.state));
@@ -141,7 +146,7 @@ function loadSettingsData() {
       ipTouched = false;
       _showHome(d.home);
     })
-    .fail(() => _settingsStatus("Could not load settings.", "danger"));
+    .fail(() => _settingsStatus("set.load_failed", "danger"));
 }
 
 /* wifi scan */
@@ -158,7 +163,7 @@ function runWifiScan() {
 
       const nets = (d.networks || []).sort((a, b) => b.rssi - a.rssi);
       if (!nets.length) {
-        list.innerHTML = '<span class="list-group-item text-muted">No networks found</span>';
+        list.innerHTML = '<span class="list-group-item text-muted">' + _esc(t("set.no_networks")) + '</span>';
       } else {
         nets.forEach(n => {
           const item = document.createElement("a");
@@ -180,16 +185,16 @@ function runWifiScan() {
       }
       document.getElementById("wifi-scan-results").style.display = "";
     })
-    .fail(() => _settingsStatus("Scan failed.", "danger"))
+    .fail(() => _settingsStatus("set.scan_failed", "danger"))
     .always(() => {
       btn.disabled = false;
-      btn.textContent = "Scan";
+      btn.textContent = t("set.scan");
     });
 }
 
 /* disconnect STA */
 function staDisconnect() {
-  if (!confirm("Disconnect from home network?")) return;
+  if (!confirm(t("set.disconnect_q"))) return;
 
   $.ajax({ url: "/wifi/disconnect", type: "POST",
            contentType: "application/json", data: "{}" })
@@ -197,9 +202,9 @@ function staDisconnect() {
       document.getElementById("sta-ssid").value = "";
       document.getElementById("sta-pass").value = "";
       _showStaSaved(false, false);
-      _settingsStatus("Disconnected. Reconnect to the AP to continue.", "info");
+      _settingsStatus("set.disconnected", "info");
     })
-    .fail(() => _settingsStatus("Disconnect failed.", "danger"));
+    .fail(() => _settingsStatus("set.disconnect_failed", "danger"));
 }
 
 /* save & restart */
@@ -211,10 +216,10 @@ function saveSettings() {
 
   /* basic validation */
   if (apSsid.length < 1) {
-    return _settingsStatus("AP network name cannot be empty.", "warning");
+    return _settingsStatus("set.err_ap_name", "warning");
   }
   if (apPass.length > 0 && apPass.length < 8) {
-    return _settingsStatus("AP password must be at least 8 characters.", "warning");
+    return _settingsStatus("set.err_ap_pass", "warning");
   }
 
   const payload = {};
@@ -229,14 +234,14 @@ function saveSettings() {
       const v = id => $(id).val().trim();
       const ipRe = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
       const ok = s => ipRe.test(s) && s.split(".").every(n => +n <= 255);
-      const fields = [["#ip-addr", "Address"], ["#ip-mask", "Mask"], ["#ip-gw", "Gateway"]];
-      for (const [id, name] of fields) {
+      const fields = [["#ip-addr", "set.address"], ["#ip-mask", "set.mask"], ["#ip-gw", "set.gateway"]];
+      for (const [id, key] of fields) {
         if (!ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
-          return _settingsStatus(`${name}: four numbers, like ${$(id).attr("placeholder")}.`, "warning"); }
+          return _settingsStatus("set.err_ip", "warning", { field: t(key), example: $(id).attr("placeholder") }); }
       }
-      for (const [id, name] of [["#ip-dns1", "DNS 1"], ["#ip-dns2", "DNS 2"]]) {
+      for (const [id, key] of [["#ip-dns1", "set.dns1"], ["#ip-dns2", "set.dns2"]]) {
         if (v(id) && !ok(v(id))) { $("#ip-settings").collapse("show"); $(id).trigger("focus");
-          return _settingsStatus(`${name}: four numbers, or leave it empty.`, "warning"); }
+          return _settingsStatus("set.err_ip_optional", "warning", { field: t(key) }); }
       }
       payload.ip = { mode: "manual", ip: v("#ip-addr"), mask: v("#ip-mask"), gw: v("#ip-gw"),
                      dns1: v("#ip-dns1"), dns2: v("#ip-dns2") };
@@ -247,14 +252,14 @@ function saveSettings() {
 
   const btn = document.getElementById("settings-save-btn");
   btn.disabled = true;
-  btn.textContent = "Saving…";
+  btn.textContent = t("set.saving");
   _settingsStatus("", "");
 
   if (OFFLINE_MODE) {
     setTimeout(() => {
       btn.disabled = false;
-      btn.textContent = "Save & Restart";
-      _settingsStatus("Offline mode — settings not sent.", "warning");
+      btn.textContent = t("set.save_restart");
+      _settingsStatus("set.offline_not_sent", "warning");
     }, 600);
     return;
   }
@@ -267,23 +272,20 @@ function saveSettings() {
   })
   .done(resp => {
     if (resp && resp.restart) {
-      _settingsStatus(
-        "Saved! Device is restarting. Reconnect to the AP with the new credentials. " +
-        "When the farm has joined your home network, its address there is shown on this page.",
-        "success"
-      );
-      btn.textContent = "Restarting…";
+      _settingsStatus("set.saved_restart", "success");
+      btn.textContent = t("set.restarting");
     } else {
-      _settingsStatus("Saved.", "success");
+      _settingsStatus("set.saved", "success");
       btn.disabled = false;
-      btn.textContent = "Save & Restart";
+      btn.textContent = t("set.save_restart");
     }
   })
   .fail(xhr => {
-    const msg = (xhr.responseJSON && xhr.responseJSON.error) || "Save failed.";
-    _settingsStatus(msg, "danger");
+    // The controller's own error text is shown as it comes
+    const err = xhr.responseJSON && xhr.responseJSON.error;
+    if (err) _settingsStatusText(err, "danger"); else _settingsStatus("set.save_failed", "danger");
     btn.disabled = false;
-    btn.textContent = "Save & Restart";
+    btn.textContent = t("set.save_restart");
   });
 }
 
@@ -300,12 +302,15 @@ function _togglePass(inputId, btnId) {
   }
 }
 
+let staBadge = { saved: false, connected: false };   // redrawn on language change
+
 function _showStaSaved(saved, connected) {
+  staBadge = { saved: saved, connected: connected };
   const badge = document.getElementById("sta-saved-badge");
   const disconnRow = document.getElementById("sta-disconnect-row");
   if (saved) {
     badge.style.removeProperty("display");
-    badge.textContent = connected ? "Connected" : "Saved";
+    badge.textContent = t(connected ? "set.badge_connected" : "set.badge_saved");
     badge.className = connected ? "badge badge-success" : "badge badge-secondary";
     disconnRow.style.display = "";
   } else {
@@ -314,13 +319,34 @@ function _showStaSaved(saved, connected) {
   }
 }
 
-function _settingsStatus(msg, type) {
+// Status line: a text key (+ placeholder values), redrawn on language
+// change; "" hides it
+let settingsStatus = null;
+function _settingsStatus(key, type, params) {
+  settingsStatus = key ? { key: key, type: type, params: params } : null;
+  _showSettingsStatus(key ? t(key, params) : "", type);
+}
+// A text that is not in local.json (an error from the controller)
+function _settingsStatusText(msg, type) {
+  settingsStatus = null;
+  _showSettingsStatus(msg, type);
+}
+function _showSettingsStatus(msg, type) {
   const el = document.getElementById("settings-status");
   if (!msg) { el.style.display = "none"; return; }
   el.className = "alert alert-" + type;
   el.textContent = msg;
   el.style.display = "";
 }
+
+// Language changed: redraw what this screen built in JS
+onLanguageChange(() => {
+  if (!initialized.settings) return;
+  _applyIpMode();
+  if (homeInfo) _showHome(homeInfo);
+  _showStaSaved(staBadge.saved, staBadge.connected);
+  if (settingsStatus) _showSettingsStatus(t(settingsStatus.key, settingsStatus.params), settingsStatus.type);
+});
 
 function _rssiBars(rssi) {
   if (rssi >= -55) return "▂▄▆█";

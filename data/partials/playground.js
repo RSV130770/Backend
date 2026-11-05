@@ -32,18 +32,20 @@ function buildPlayground() {
           <div class="pic" style="${o.style}">
           <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
           </div>
-          <strong>${o.label}</strong>
+          <strong class="out-label" data-out-id="${o.id}">${_escT0(outLabel(o))}</strong>
           </div>
 
 <div class="play-controls d-flex">
   <!-- same look as the Dashboard start/stop buttons -->
-  <button class="btn btn-success btn-small play-btn play-on" data-id="${o.id}" data-action="on">
+  <button class="btn btn-success btn-small play-btn play-on" data-id="${o.id}" data-action="on"
+          title="${_escT0(t('dash.btn_start'))}" data-i18n-title="dash.btn_start">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
       <path d="M4 3.3v9.4L12 8 4 3.3z" />
     </svg>
   </button>
 
-  <button class="btn btn-danger btn-small play-btn play-off" data-id="${o.id}" data-action="off">
+  <button class="btn btn-danger btn-small play-btn play-off" data-id="${o.id}" data-action="off"
+          title="${_escT0(t('dash.btn_stop'))}" data-i18n-title="dash.btn_stop">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
       <rect x="4" y="4" width="8" height="8" />
     </svg>
@@ -72,25 +74,25 @@ function buildPlayground() {
               <div class="card-body">
 
                 <div class="form-group">
-                  <label>Rise Time (ms)</label>
+                  <label data-i18n="pg.rise_ms">${_escT0(t('pg.rise_ms'))}</label>
                   <input type="number" class="form-control rise-input"
                          data-id="${o.id}" value="${o.riseDefault || 0}">
                 </div>
 
                 <div class="form-group">
-                  <label>Fall Time (ms)</label>
+                  <label data-i18n="pg.fall_ms">${_escT0(t('pg.fall_ms'))}</label>
                   <input type="number" class="form-control fall-input"
                          data-id="${o.id}" value="${o.fallDefault || 0}">
                 </div>
 
                 <div class="form-group">
-                  <label>On Time (sec)</label>
+                  <label data-i18n="pg.on_sec">${_escT0(t('pg.on_sec'))}</label>
                   <input type="number" class="form-control ontime-input"
                          data-id="${o.id}" value="0">
                 </div>
 
                 <div class="form-group">
-                  <label>Off Time (sec)</label>
+                  <label data-i18n="pg.off_sec">${_escT0(t('pg.off_sec'))}</label>
                   <input type="number" class="form-control offtime-input"
                          data-id="${o.id}" value="0">
                 </div>
@@ -189,8 +191,8 @@ $(".play-slider").not(".play-sound-volume").on("input", function () {
 
   // Cancel ramping highlight
   $(`.play-btn[data-id=${id}]`).each(function () {
-    const t = $(this).data("timer");
-    if (t) clearTimeout(t);
+    const timer = $(this).data("timer");
+    if (timer) clearTimeout(timer);
     $(this).removeClass("play-active");
   });
 
@@ -306,15 +308,15 @@ function loadSoundFiles(done) {
 // Fill a <select> with the sound files; a file named by an event but no
 // longer on the controller stays selectable, marked "missing"
 function fillSoundSelect($sel, selected) {
-  $sel.html('<option value="">Loading...</option>');
+  $sel.empty().append($('<option value="">').text(t("common.loading")));
   loadSoundFiles(list => {
     const names = list.slice();
     if (selected && !names.includes(selected)) names.unshift(selected);
     $sel.empty();
-    if (!names.length) $sel.append('<option value="">No .wav files</option>');
-    else if (!selected) $sel.append('<option value="">Choose a sound</option>');
+    if (!names.length) $sel.append($('<option value="">').text(t("pg.no_wav")));
+    else if (!selected) $sel.append($('<option value="">').text(t("pg.choose_sound")));
     names.forEach(n => {
-      const missing = !list.includes(n) ? " (missing)" : "";
+      const missing = !list.includes(n) ? " " + t("pg.missing") : "";
       $sel.append($("<option>").val(n).text(n + missing));
     });
     $sel.val(selected || "");
@@ -330,10 +332,10 @@ function buildSoundCard(o) {
           <div class="pic" style="${o.style}">
             <img src="${o.icon}" style="${invertStyle}" width="28" height="28">
           </div>
-          <strong>${o.label}</strong>
+          <strong class="out-label" data-out-id="${o.id}">${_escT0(outLabel(o))}</strong>
         </div>
         <div class="play-controls d-flex">
-          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="Play">
+          <button class="btn btn-success btn-small play-btn play-sound-btn" data-id="${o.id}" title="${_escT0(t('pg.play'))}" data-i18n-title="pg.play">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
               <path d="M4 3.3v9.4L12 8 4 3.3z" />
             </svg>
@@ -356,7 +358,7 @@ function buildSoundCard(o) {
 
 function playSoundNow(id, file, volume) {
   const $err = $(`#play-sound-err-${id}`).addClass("d-none");
-  if (!file) { $err.text("Choose a sound first.").removeClass("d-none"); return; }
+  if (!file) { $err.text(t("pg.err_choose")).removeClass("d-none"); return; }
   const $btn = $(`.play-sound-btn[data-id=${id}]`).addClass("play-active");
   setTimeout(() => $btn.removeClass("play-active"), 600);
   if (OFFLINE_MODE) return;
@@ -365,6 +367,24 @@ function playSoundNow(id, file, volume) {
     type: "POST",
     contentType: "application/json",
     data: JSON.stringify({ file, volume }),
-    error: () => $err.text("The controller could not play " + file + ".").removeClass("d-none")
+    error: () => $err.text(t("pg.err_play", { file: file })).removeClass("d-none")
   });
 }
+
+// Text for HTML built in template strings
+function _escT0(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Language changed: output names, sound lists and error lines of the cards
+onLanguageChange(() => {
+  if (!initialized.playground) return;
+  $("#playground-container .out-label").each(function () {
+    const cfg = outputsConfig.find(c => String(c.id) === String($(this).data("out-id")));
+    $(this).text(outLabel(cfg));
+  });
+  $("#playground-container select[id^='play-sound-file-']").each(function () {
+    fillSoundSelect($(this), $(this).val());
+  });
+  $("#playground-container [id^='play-sound-err-']").addClass("d-none");
+});
