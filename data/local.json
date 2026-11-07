@@ -105,7 +105,7 @@
     "sch.apply": {"en": "Apply", "ru": "Применить", "et": "Rakenda"},
     "sch.edit_stage": {"en": "Edit stage", "ru": "Изменить этап", "et": "Muuda etappi"},
     "sch.add_group_tip": {"en": "Add a group to this stage", "ru": "Добавить группу в этот этап", "et": "Lisa sellele etapile grupp"},
-    "sch.pauses_at_end": {"en": "Pauses at its end", "ru": "Закнчивается паузой", "et": "Lõpus paus"},
+    "sch.pauses_at_end": {"en": "Pauses at its end", "ru": "Заканчивается паузой", "et": "Lõpus paus"},
     "sch.no_groups": {"en": "No groups yet. Tap ✏ and then Add group.", "ru": "Групп пока нет. Нажмите ✏, затем «Добавить группу».", "et": "Gruppe veel pole. Puuduta ✏ ja siis „Lisa grupp“."},
     "sch.stage_default_name": {"en": "Stage {n}", "ru": "Этап {n}", "et": "Etapp {n}"},
     "sch.cycle": {"en": "{time} cycle", "ru": "цикл {time}", "et": "{time} tsükkel"},
