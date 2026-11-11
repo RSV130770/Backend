@@ -864,3 +864,19 @@ html, body {
   color: #007bff;
   font-weight: 600;
 }
+
+/* Schedule footer: on narrow screens and with long translations the buttons
+   move to a new row as a whole; a word inside a button is never split */
+#schedule .card-footer {
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+#schedule .card-footer .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  margin: 0.25rem 0 0.25rem 0.5rem;
+}
+#schedule .card-footer #delete-btn { margin-left: 0; }
