@@ -604,6 +604,62 @@ table {
   font-weight: 600;
 }
 
+/* group: name on the first line, repeat and time on the second */
+.tree-node-line,
+.tree-node-timing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-node-timing {
+  margin-top: 2px;
+  color: #666;
+  font-size: 0.85em;
+}
+
+/* schedule buttons, first row: share the width; a two-word label may wrap
+   between its words, a single word is never split */
+.sch-footer .d-flex .btn {
+  flex: 1 1 auto;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  line-height: 1.2;
+  min-height: 38px;
+  overflow-wrap: normal;   /* .card sets break-word, which splits words */
+  word-wrap: normal;
+  min-width: min-content;  /* never narrower than its longest word */
+}
+
+/* task picker row with its own delete button */
+.pick-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.pick-row .list-group-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pick-del-btn {
+  flex: 0 0 48px;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+  background: none;
+  color: #dc3545;
+  font-size: 1.1rem;
+}
+
+/* small phones: a slightly smaller font so long words still fit in one row */
+@media (max-width: 360px) {
+  .sch-footer .d-flex .btn {
+    font-size: 0.9rem;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+}
+
 .tree-leaves {
   border-top: 1px solid #eee;
 }
@@ -639,7 +695,9 @@ table {
 }
 
 .tree-leaf-duty {
-  flex: 0 0 48px;
+  flex: 0 0 auto;
+  min-width: 48px;
+  margin-left: 6px;
   text-align: right;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -746,12 +804,20 @@ html, body {
   font-size: 1.05rem;
   font-weight: 600;
   line-height: 1.25;
-  word-break: break-word;
 }
 .dash-tile-sub {
   margin-top: 0.15rem;
   font-size: 0.8rem;
   color: #6c757d;
+}
+/* One line each; fitText() (system.js) makes the font smaller until the
+   text fits, and "..." ends what is still too long at the smallest size */
+.dash-tile-label,
+.dash-tile-value,
+.dash-tile-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dash-tile-bar {
   height: 4px;
@@ -809,19 +875,6 @@ html, body {
 .stage-pause { margin-left: 6px; color: #d39e00; }
 .stage-groups { padding: 0 8px 4px 8px; }
 .stage-empty { padding: 4px 0 8px 26px; }
-.stage-add-btn {
-  width: 36px;
-  height: 36px;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
-  color: #28a745;
-  cursor: pointer;
-}
-.stage-add-btn:hover { color: #1e7e34; }
 #stageModal {
   z-index: 3000 !important;    /* above the raised .modal-backdrop (2950) */
 }
@@ -864,19 +917,3 @@ html, body {
   color: #007bff;
   font-weight: 600;
 }
-
-/* Schedule footer: on narrow screens and with long translations the buttons
-   move to a new row as a whole; a word inside a button is never split */
-#schedule .card-footer {
-  flex-wrap: wrap;
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-}
-#schedule .card-footer .btn {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  overflow-wrap: normal;
-  word-break: keep-all;
-  margin: 0.25rem 0 0.25rem 0.5rem;
-}
-#schedule .card-footer #delete-btn { margin-left: 0; }
