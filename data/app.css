@@ -78,18 +78,6 @@ padding-left:10px;
 #mainNavList { display: flex; justify-content: center; width: 100%; }
 #datetime { margin-left: 1rem; }
 
-/* Mobile menu: the hamburger and the clock stay on the top row; the menu
-   opens under them as a full-width list instead of squeezing between them */
-@media (max-width: 767.98px) {
-  .navbar { flex-wrap: wrap; }
-  .navbar #datetime { margin-left: auto; white-space: nowrap; }
-  #mainNav { order: 3; flex: 0 0 100%; }
-  #mainNavList { flex-direction: column; align-items: stretch; padding: 0.25rem 0 0.5rem; border-bottom: 1px solid #dee2e6; }
-  #mainNavList .nav-item + .nav-item { border-top: 1px solid #e9ecef; }
-  #mainNavList .nav-link { padding: 0.65rem 0.75rem; border-radius: 0.25rem; }
-  #mainNavList .nav-link.active { background: rgba(0, 123, 255, 0.1); color: #007bff; font-weight: 600; }
-}
-
 .nav-dots {
   display: flex;
   justify-content: center;

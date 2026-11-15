@@ -185,6 +185,8 @@
     "save.err_exists": {"en": "A task named \"{name}\" already exists. Please choose another name.", "ru": "Задача «{name}» уже есть. Выберите другое название.", "et": "Ülesanne nimega „{name}“ on juba olemas. Vali teine nimi."},
     "save.failed": {"en": "Saving failed: {error}", "ru": "Не удалось сохранить: {error}", "et": "Salvestamine ebaõnnestus: {error}"},
 
+    "demo.badge": {"en": "Demo", "ru": "Демо", "et": "Demo"},
+    "demo.tip": {"en": "Demo mode: no controller, changes are not saved", "ru": "Демо-режим: без контроллера, изменения не сохраняются", "et": "Demorežiim: ilma kontrollerita, muudatusi ei salvestata"},
     "del.title": {"en": "Delete schedule?", "ru": "Удалить расписание?", "et": "Kustutada ajakava?"},
     "del.will_be_deleted": {"en": "\"{name}\" will be deleted.", "ru": "Задача «{name}» будет удалена.", "et": "„{name}“ kustutatakse."},
     "del.running": {"en": "It is running now and will be stopped.", "ru": "Она сейчас работает и будет остановлена.", "et": "See töötab praegu ja peatatakse."},
