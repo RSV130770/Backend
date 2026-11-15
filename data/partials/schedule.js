@@ -78,8 +78,11 @@ function buildTreeNode(events) {
       <input type="checkbox" class="tree-check node-check"
              ${allEnabled ? 'checked' : ''}>
       <div class="tree-node-label" title="${escapeHtml(nodeInfo)}">
-        <span class="tree-node-days${nodeDays ? '' : ' d-none'}">${nodeDays}</span>
-        <span class="tree-node-channels">${escapeHtml(nodeLabel)}</span>
+        <div class="tree-node-line">
+          <span class="tree-node-days${nodeDays ? '' : ' d-none'}">${nodeDays}</span>
+          <span class="tree-node-channels">${escapeHtml(nodeLabel)}</span>
+        </div>
+        <div class="tree-node-timing"></div>
       </div>
       <div class="tree-actions">
         <button class="tree-edit-btn" title="${escapeHtml(t('common.edit'))}" data-i18n-title="common.edit">✏</button>
@@ -129,6 +132,7 @@ function buildTreeNode(events) {
   });
 
   updateNodeCheckboxFor($node);
+  refreshNodeSummary($node);      // timing line and leaf times
   return $node;
 }
 
@@ -189,7 +193,6 @@ function buildStageNode(st) {
         <span class="stage-pause d-none" title="${escapeHtml(t('sch.pauses_at_end'))}" data-i18n-title="sch.pauses_at_end">⏸</span>
       </div>
       <div class="tree-actions">
-        <button class="stage-add-btn" title="${escapeHtml(t('sch.add_group_tip'))}" data-i18n-title="sch.add_group_tip">+</button>
         <button class="tree-edit-btn" title="${escapeHtml(t('sch.edit_stage'))}" data-i18n-title="sch.edit_stage">✏</button>
       </div>
     </div>
@@ -210,12 +213,6 @@ function buildStageNode(st) {
       ensureCollapseShown($groups);
       $toggle.text('▼');
     }
-  });
-  $s.find('.stage-add-btn').on('click', e => {
-    e.stopPropagation();
-    ensureCollapseShown($groups);
-    $s.find('.stage-header .tree-toggle').text('▼');
-    openBatchModal(null, generateGroupId(), $s.data('stage').id);
   });
   $s.find('.stage-header .tree-edit-btn').on('click', e => {
     e.stopPropagation();
@@ -313,6 +310,7 @@ function openStageModal($stage) {
   $('#stage-delete-cancel').off('click').on('click', () => $('#stage-delete-confirm').addClass('d-none'));
   $('#stage-delete-ok').off('click').on('click', deleteStage);
   $('#stage-save-btn').off('click').on('click', saveStage);
+  $('#stage-add-group-btn').off('click').on('click', addGroupFromStageModal);
 
   updateStageModalHints();
   $('#stageModal').modal({ backdrop: 'static', keyboard: false });
@@ -351,6 +349,19 @@ function deleteStage() {
   refreshStageHeaders();
 }
 
+// "Add group" in the stage editor: keeps the stage (as OK does), then opens
+// the group editor for a new group in it
+function addGroupFromStageModal() {
+  const $stage = saveStage();
+  if (!$stage) return;
+  $('#stageModal').one('hidden.bs.modal', () => {
+    ensureCollapseShown($stage.find('.stage-groups'));
+    $stage.find('.stage-header .tree-toggle').text('▼');
+    openBatchModal(null, generateGroupId(), $stage.data('stage').id);
+  });
+}
+
+// Returns the stage node, or nothing when a field is wrong
 function saveStage() {
   const name = $('#stage-name').val().trim();
   const days = Math.max(0, Math.min(365, parseInt($('#stage-days').val()) || 0));
@@ -370,16 +381,18 @@ function saveStage() {
     return fail(t('stage.err_message'), $('#stage-message'));
 
   const values = { name, days, hours, endPause: !!endPause, message: endPause ? message : '' };
-  if (stageModalNode) {
-    stageModalNode.data('stage', Object.assign({}, stageModalNode.data('stage'), values));
+  let $s = stageModalNode;
+  if ($s) {
+    $s.data('stage', Object.assign({}, $s.data('stage'), values));
   } else {
-    const $s = buildStageNode(Object.assign(newStage(nextStageId(), name, days, hours), values));
+    $s = buildStageNode(Object.assign(newStage(nextStageId(), name, days, hours), values));
     const $last = stageNodes().last();
     if ($last.length && stageIsOpen($last.data('stage'))) $s.insertBefore($last);
     else $('#schedule-tree').append($s);
   }
   $('#stageModal').modal('hide');
   refreshStageHeaders();
+  return $s;
 }
 
 function leafDutyText(ev) {
@@ -580,6 +593,13 @@ function buildNodeSummary(events) {
       events.find(ev => ev.time !== nodeTime);
     if (offEv) nodeTime = `${nodeTime}→${offEv.time}`;
   }
+  // Second line of the group: repeat and timing shared by its channels
+  // (time first, so a narrow screen cuts the repeat name, not the time)
+  const nodeTiming = repeat === 'custom'
+    ? `${shortDuration(first.on)}:${shortDuration(first.off)} · ${t('sch.repeat_custom')}`
+    : `${nodeTime} · ${t(repeat === 'daily' ? 'sch.repeat_daily' : 'sch.repeat_once')}`;
+  const groupTimes = nodeTime.split('→');
+
   // Shown in the group line: delay "+2d" and duration "10d", only if set
   const days = [];
   if (afterDays > 0) days.push(`+${afterDays}d`);
@@ -591,7 +611,7 @@ function buildNodeSummary(events) {
   const pauseEv = groupPause(events);
   const nodeInfo = `${when} · ${formatRepeat(repeat)} · ${channelList}` +
     (pauseEv ? ' · ' + t('sch.pause_info', { message: tName(pauseEv.message) || '' }) : '');
-  return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList };
+  return { nodeLabel, nodeTime, nodeDays, nodeInfo, channelList, nodeTiming, groupTimes, first };
 }
 
 function refreshNodeSummary($node) {
@@ -602,10 +622,31 @@ function refreshNodeSummary($node) {
   });
   if (events.length === 0) return;
 
-  const { nodeLabel, nodeDays, nodeInfo } = buildNodeSummary(events);
-  $node.find('.tree-node-days').text(nodeDays).toggleClass('d-none', !nodeDays);
-  $node.find('.tree-node-channels').text(nodeLabel);
-  $node.find('.tree-node-label').attr('title', nodeInfo);
+  const sum = buildNodeSummary(events);
+  $node.find('.tree-node-days').text(sum.nodeDays).toggleClass('d-none', !sum.nodeDays);
+  $node.find('.tree-node-channels').text(sum.nodeLabel);
+  $node.find('.tree-node-timing').text(sum.nodeTiming);
+  $node.find('.tree-node-label').attr('title', sum.nodeInfo);
+
+  // A leaf shows its time only where it differs from the group's timing
+  $node.find('.tree-leaf').each(function () {
+    const tm = leafOwnTime($(this).data('event'), sum);
+    $(this).find('.tree-leaf-time').text(tm).toggleClass('d-none', !tm);
+  });
+}
+
+// Time of a leaf that the group line does not already show, or ""
+function leafOwnTime(ev, sum) {
+  if (!ev) return '';
+  if (ev.repeat === 'custom') {
+    const f = sum.first;
+    if (f.repeat === 'custom' && +ev.on === +f.on && +ev.off === +f.off) {
+      const offset = customOffsetSec(ev);
+      return offset > 0 ? `+${shortDuration(offset)}` : '';
+    }
+    return leafTimeText(ev);
+  }
+  return sum.groupTimes.includes(ev.time || '--:--') ? '' : leafTimeText(ev);
 }
 
 function generateGroupId() {
@@ -657,8 +698,6 @@ function updateScheduleHeader() {
   const task = taskList.find(x => x.index === taskIndex);
   const name = task ? tName(task.name) : "--";
   $("#schedule-task-name").text(taskIndex === 0 ? name + " " + t("sch.template_mark") : name);
-  // The template cannot be deleted
-  $("#delete-btn").prop("disabled", !task || taskIndex === 0);
 }
 
 // ---------------------------------------------------------
@@ -834,8 +873,6 @@ function bindScheduleUI() {
   $('#add-btn').on('click', addStage);
   $('#apply-btn').on('click', applyScheduleToServer);
   $('#cancel-btn').on('click', loadScheduleFromTask);
-  $('#delete-btn').on('click', showDeleteDialog);
-  $('#delete-confirm').on('click', deleteCurrentTask);
 }
 
 // ---------------------------------------------------------
@@ -1499,7 +1536,6 @@ function saveScheduleItem() {
 
   currentItem.data('event', ev);
   currentItem.find('.tree-leaf-duty').text(leafDutyText(ev));
-  currentItem.find('.tree-leaf-time').text(leafTimeText(ev));
   refreshNodeSummary(currentItem.closest('.tree-node'));
 
   currentItem = null;
@@ -1654,18 +1690,11 @@ function sendScheduleToServer(index, name) {
 // ---------------------------------------------------------
 // DELETE PRESET
 // ---------------------------------------------------------
-function showDeleteDialog() {
-  if (taskIndex === 0) return;   // the template cannot be deleted
-  const running = (taskStatus === 'running' || taskStatus === 'paused');
-  $('#delete-text').text(t('del.will_be_deleted', { name: tName(currentTaskName || '') }));
-  $('#delete-running-hint').toggle(running);
-  $('#deleteModal').modal({ backdrop: 'static', keyboard: false });
-  $('#deleteModal').modal('show');
-}
-
-function deleteCurrentTask() {
-  const id = taskIndex;
-  $('#deleteModal').modal('hide');
+// Deletes a saved task (asked for in the Dashboard task picker). The
+// template (id 0) cannot be deleted.
+function deleteTask(id) {
+  if (!id) return;
+  const wasSelected = (id === taskIndex);
   $.ajax({
     url: "/preset/delete",
     type: "POST",
@@ -1679,17 +1708,19 @@ function deleteCurrentTask() {
         taskList.unshift({ index: 0, name: 'Default', builtIn: true });
         $('#taskSelect').prepend('<option value="0">Default</option>');
       }
-      if (taskStatus === 'running' || taskStatus === 'paused') {
-        // The controller stopped it
-        taskStatus = 'stopped';
-        taskStartTime = null;
+      if (wasSelected) {
+        if (taskStatus === 'running' || taskStatus === 'paused') {
+          // The controller stopped it
+          taskStatus = 'stopped';
+          taskStartTime = null;
+        }
+        // The controller selects the template when the selected one is deleted
+        taskIndex = 0;
+        $('#taskSelect').val(taskIndex);
       }
-      // The controller selects the template when the selected one is deleted
-      taskIndex = 0;
-      $('#taskSelect').val(taskIndex);
       updateTaskUI(taskStatus);
       updateScheduleHeader();
-      loadScheduleFromTask();
+      if (wasSelected) loadScheduleFromTask();
     },
     error: xhr => {
       console.warn("/preset/delete failed:", xhr.status, xhr.responseText);

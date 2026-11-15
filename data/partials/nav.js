@@ -175,6 +175,8 @@ function showPage(name) {
   document.getElementById("container").style.transform =
     `translateX(-${index * 100}vw)`;
   updateDots(index);
+  // All screens share one document scroll: a new screen starts at its top
+  if (previous !== name) window.scrollTo(0, 0);
 //  updateFooterLabel();
   if (OFFLINE_MODE) return;
   // Scheduler pause/resume: entering Playground from the Dashboard side

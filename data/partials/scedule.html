@@ -14,11 +14,14 @@
 
     </div>
 
-    <div class="card-footer d-flex justify-content-end">
-      <button class="btn btn-outline-danger mr-auto" id="delete-btn" disabled data-i18n="common.delete">Delete</button>
-      <button class="btn btn-success" id="add-btn" title="Add a stage" data-i18n-title="sch.add_stage_tip" data-i18n="sch.add_stage">Add stage</button>
-      <button class="btn btn-primary" id="apply-btn" data-i18n="sch.apply">Apply</button>
-      <button class="btn btn-secondary" id="cancel-btn" data-i18n="common.cancel">Cancel</button>
+    <!-- Row 1: Add stage, Apply; row 2: Cancel on its own.
+         A whole task is deleted in the Dashboard task picker. -->
+    <div class="card-footer sch-footer">
+      <div class="d-flex">
+        <button class="btn btn-success" id="add-btn" title="Add a stage" data-i18n-title="sch.add_stage_tip" data-i18n="sch.add_stage">Add stage</button>
+        <button class="btn btn-primary ml-2" id="apply-btn" data-i18n="sch.apply">Apply</button>
+      </div>
+      <button class="btn btn-secondary btn-block mt-2" id="cancel-btn" data-i18n="common.cancel">Cancel</button>
     </div>
 
   </div>

@@ -200,6 +200,7 @@ function updateTaskUI(status) {
   }[status] || t("dash.status_stopped");
   $("#taskStatusLabel").text(line);
   $("#taskTile").attr("data-status", status);
+  fitTiles();
 
   // Stage-end banner
   $("#pause-banner").toggleClass("d-none", status !== "frozen");
@@ -552,6 +553,7 @@ function renderStageTile() {
   $("#stageTileDays").text(days);
   $("#stageTileBar").css("width", pct + "%");
   $("#stageTile").toggleClass("disabled", stageList.length === 0);
+  fitTiles();
 }
 
 /* ---------- picker dialog ---------- */
@@ -567,16 +569,27 @@ function openPicker(title, items, onPick) {
     if (it.sub) $b.append($('<div class="small text-muted"></div>').text(it.sub));
     if (it.current) $b.addClass("current");
     $b.on("click", () => onPick(it));
-    $list.append($b);
+    if (it.onDelete) {
+      // A row with its own delete button (the button is not inside the row
+      // button, so a tap on it never picks the row)
+      const $row = $('<div class="pick-row"></div>').append($b);
+      $('<button type="button" class="pick-del-btn">🗑</button>')
+        .attr({ title: t("pick.delete_tip"), "aria-label": t("pick.delete_tip") })
+        .on("click", e => { e.stopPropagation(); it.onDelete(it); })
+        .appendTo($row);
+      $list.append($row);
+    } else {
+      $list.append($b);
+    }
   });
   $("#pick-confirm").addClass("d-none");
   $("#pickModal").modal("show");
 }
 
 // Second step in the same dialog: a question with Back / Yes
-function askPicker(question, okText, action) {
+function askPicker(question, okText, action, danger) {
   $("#pick-question").text(question);
-  $("#pick-ok").text(okText);
+  $("#pick-ok").text(okText).toggleClass("btn-danger", !!danger).toggleClass("btn-success", !danger);
   pickAction = action;
   $("#pick-list").addClass("d-none");
   $("#pick-confirm").removeClass("d-none");
@@ -592,7 +605,9 @@ function openTaskPicker() {
   const items = taskList.map(x => ({
     id: x.index,
     label: tName(x.name),
-    current: x.index === taskIndex
+    current: x.index === taskIndex,
+    // the template (id 0) cannot be deleted
+    onDelete: (x.index !== 0 && !OFFLINE_MODE) ? askDeleteTask : null
   }));
   openPicker(t("pick.task_title"), items, it => {
     if (it.id === taskIndex) { closePicker(); return; }
@@ -609,6 +624,14 @@ function openTaskPicker() {
       requestTaskStart();
     });
   });
+}
+
+// Delete step of the task picker: Back / Delete in the same dialog
+function askDeleteTask(it) {
+  const running = it.id === taskIndex && isTaskActive();
+  const question = t("del.will_be_deleted", { name: it.label }) +
+    (running ? " " + t("del.running") : "");
+  askPicker(question, t("common.delete"), () => deleteTask(it.id), true);
 }
 
 /* ---------- stage tile ---------- */
