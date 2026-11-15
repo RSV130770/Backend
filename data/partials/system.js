@@ -164,6 +164,59 @@ Promise.all([detectOfflineMode(), I18N_READY]).then(([isOffline]) => {
 /* ============================================================
    UTILS
    ============================================================ */
+
+// "Shrink text on overflow", as in PowerPoint: the text stays on one line
+// and its font gets smaller until it fits the box, but not below minPx.
+// Still too long at minPx: wrap = true lets it go on a second line,
+// otherwise the CSS ends it with "..." (text-overflow).
+// The element needs white-space: nowrap and overflow: hidden.
+// Returns the size it ended with (px), 0 when it is not laid out.
+// Widths are measured with fractions: scrollWidth is rounded to whole
+// pixels, and a text a fraction of a pixel too wide already gets "...".
+function textTooWide(el) {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  return r.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
+}
+
+function fitText(el, minPx, wrap) {
+  if (!el) return 0;
+  el.style.fontSize = "";                        // start again from the CSS
+  el.style.whiteSpace = "";
+  if (!el.clientWidth) return 0;                 // not laid out (hidden)
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  while (textTooWide(el) && size > minPx) {
+    size = Math.max(minPx, size - 0.5);
+    el.style.fontSize = size + "px";
+  }
+  if (wrap && textTooWide(el)) el.style.whiteSpace = "normal";
+  return size;
+}
+
+// A set of boxes that belong together get one size: the smallest any of
+// them needs (the two tiles side by side look even)
+function fitTogether(els, minPx, wrap) {
+  const sizes = els.map(el => fitText(el, minPx, wrap)).filter(s => s > 0);
+  if (!sizes.length) return;
+  const size = Math.min(...sizes);
+  els.forEach(el => { el.style.fontSize = size + "px"; });
+  if (wrap) els.forEach(el => {
+    el.style.whiteSpace = "";                    // measure on one line first
+    if (textTooWide(el)) el.style.whiteSpace = "normal";
+  });
+}
+
+// The task and stage tiles on the Dashboard: names in Russian or Estonian
+// are often longer than the tile. Names shrink and end with "..." at
+// worst; the status and day lines may take a second line instead, so the
+// start time is never cut off.
+function fitTiles() {
+  const all = sel => Array.from(document.querySelectorAll(sel));
+  fitTogether(all(".dash-tile-label"), 9, false);
+  fitTogether(all(".dash-tile-value"), 12, false);
+  fitTogether(all(".dash-tile-sub"), 10, true);
+}
+window.addEventListener("resize", () => fitTiles());   // also turning the phone
 function hhmmss(totalSeconds) {
   const h = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
   const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
