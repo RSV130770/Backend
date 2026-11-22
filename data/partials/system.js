@@ -39,9 +39,7 @@ let initialized = {
    ============================================================ */
 function detectOfflineMode() {
   return new Promise(resolve => {
-    $.getJSON("/api/ping")
-      .done(() => resolve(false))   // backend is online
-      .fail(() => resolve(true));   // backend is offline
+    CONTROLLER_CHECK.then(online => resolve(!online));   // started in i18n.js
   });
 }
 
@@ -144,19 +142,34 @@ function updateDateTime() {
 /* ============================================================
    APP STARTUP
    ============================================================ */
-// Texts (i18n.js) and the controller check run side by side
-Promise.all([detectOfflineMode(), I18N_READY]).then(([isOffline]) => {
-  if (isOffline) {
-    console.warn("Backend unreachable → switching to OFFLINE_MODE");
-    OFFLINE_MODE = true;
-  }
-
-  loadOutputsConfig().then(() => {
-    initCommon();
-    appReady = true;        // allow navigation only now
-    showPage('dashboard');
+// No controller: a demo build (demo/demo.js next to the app, e.g. on a web
+// host) answers the controller's routes in the browser. Without it the app
+// runs in OFFLINE_MODE as before. The controller itself never loads it.
+function loadDemo() {
+  return new Promise(resolve => {
+    const s = document.createElement("script");
+    s.src = "/demo/demo.js";
+    s.onload = () => resolve(window.DEMO_READY ? "demo" : "offline");
+    s.onerror = () => resolve("offline");
+    document.head.appendChild(s);
   });
-});
+}
+
+// Texts (i18n.js) and the controller check run side by side
+Promise.all([detectOfflineMode(), I18N_READY])
+  .then(([isOffline]) => (isOffline ? loadDemo() : "online"))
+  .then(mode => {
+    if (mode === "offline") {
+      console.warn("Backend unreachable → switching to OFFLINE_MODE");
+      OFFLINE_MODE = true;
+    }
+
+    loadOutputsConfig().then(() => {
+      initCommon();
+      appReady = true;        // allow navigation only now
+      showPage('dashboard');
+    });
+  });
 
 
 

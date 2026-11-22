@@ -18,6 +18,12 @@
    ============================================================ */
 
 const I18N_STORE = "premifarm.lang";
+
+// One controller check at startup, shared with system.js (detectOfflineMode).
+// A web host without the controller answers 404 or an HTML page: not JSON.
+const CONTROLLER_CHECK = fetch("/api/ping", { cache: "no-store" })
+  .then(r => (r.ok ? r.json().then(() => true, () => false) : false))
+  .catch(() => false);
 const I18N = { lang: "en", def: "en", langs: [], text: {}, loaded: false, farm: "" };
 const i18nWarned = new Set();
 const i18nHooks = [];
@@ -180,8 +186,9 @@ const I18N_READY = new Promise(resolve => {
   const timer = setTimeout(() => { console.warn("i18n: /local.json timed out"); done(); }, 8000);
   // The farm's language ("" = never chosen); an old firmware without
   // /api/lang, or no controller at all, just leaves it empty
-  const farmLang = fetch("/api/lang", { cache: "no-store" })
-    .then(r => (r.ok ? r.json() : {}))
+  const farmLang = CONTROLLER_CHECK
+    .then(online => (online ? fetch("/api/lang", { cache: "no-store" }) : null))
+    .then(r => (r && r.ok ? r.json() : {}))
     .then(d => { I18N.farm = (d && d.lang) || ""; })
     .catch(() => {});
   const texts = fetch("/local.json", { cache: "no-cache" })
