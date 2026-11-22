@@ -775,7 +775,91 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-});/* ============================================================
+});
+
+/* ============================================================
+   TOUCH HINTS (Bootstrap tooltips, positioned by Popper.js)
+   ============================================================
+   Phones never show the browser's "title" hints: there is no mouse
+   hover. A long press (0.5 s) on a button or icon with a title shows
+   the same text as a Bootstrap tooltip; the press does not trigger the
+   button then. A normal tap works as before. Desktop browsers keep
+   their own title hints on hover.
+   The tooltip is created when shown and removed when hidden, so it
+   always has the current text (the language may change in between). */
+const TIP_SELECTOR = 'button[title], .btn[title], .stage-pause[title], .tree-node-label[title], .tree-leaf-time[title]';
+const TIP_DELAY = 500;          // ms of holding before the hint shows
+const TIP_SHOW = 2000;          // ms the hint stays
+let tipTimer = null, tipHideTimer = null, tipEl = null, tipText = '', tipSuppressClick = null;
+let tipX = 0, tipY = 0;
+
+function hideTip() {
+  clearTimeout(tipHideTimer);
+  if (!tipEl) return;
+  const el = tipEl;
+  tipEl = null;
+  $(el).tooltip('dispose');
+  el.setAttribute('title', tipText);       // Bootstrap emptied it
+  el.removeAttribute('data-original-title');
+}
+
+function showTip(el) {
+  hideTip();
+  const text = el.getAttribute('title');
+  if (!text || typeof $.fn.tooltip !== 'function') return;
+  tipEl = el;
+  tipText = text;
+  $(el).tooltip({
+    title: text,
+    trigger: 'manual',
+    placement: 'top',
+    container: 'body',          // #container moves with a CSS transform
+    boundary: 'viewport'
+  }).tooltip('show');
+  tipSuppressClick = el;         // the press was for the hint, not the button
+  tipHideTimer = setTimeout(hideTip, TIP_SHOW);
+}
+
+document.addEventListener('touchstart', e => {
+  clearTimeout(tipTimer);
+  hideTip();
+  if (e.touches.length !== 1) return;
+  const el = e.target.closest(TIP_SELECTOR);
+  if (!el || !el.getAttribute('title') || el.disabled) return;
+  tipX = e.touches[0].clientX;
+  tipY = e.touches[0].clientY;
+  tipTimer = setTimeout(() => showTip(el), TIP_DELAY);
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (!tipTimer || e.touches.length !== 1) return;
+  // A finger that moves is scrolling or swiping, not holding
+  if (Math.abs(e.touches[0].clientX - tipX) > 10 || Math.abs(e.touches[0].clientY - tipY) > 10) {
+    clearTimeout(tipTimer);
+    tipTimer = null;
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', () => { clearTimeout(tipTimer); tipTimer = null; }, { passive: true });
+document.addEventListener('touchcancel', () => { clearTimeout(tipTimer); tipTimer = null; }, { passive: true });
+
+// The click that follows a long press must not press the button
+document.addEventListener('click', e => {
+  if (!tipSuppressClick) return;
+  const el = tipSuppressClick;
+  tipSuppressClick = null;
+  if (el.contains(e.target)) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+
+// No system menu (copy, share) on a long press over a hinted element
+document.addEventListener('contextmenu', e => {
+  if (e.target.closest(TIP_SELECTOR)) e.preventDefault();
+});
+
+// A screen change or a scroll ends the hint
+window.addEventListener('scroll', hideTip, { passive: true });
+window.addEventListener('resize', hideTip);
+/* ============================================================
 TASK SECTION
  ============================================================ */
 
